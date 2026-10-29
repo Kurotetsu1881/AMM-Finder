@@ -51,6 +51,13 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;
 #clearBtn{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:40px;height:40px;border:0;background:none;
   color:var(--mut);font-size:26px;line-height:1;cursor:pointer}
 #clearBtn:hover{color:#fff}
+#sugg{position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:60;list-style:none;margin:0;padding:6px;text-align:left;
+  background:rgba(15,23,42,.98);border:1px solid rgba(148,163,184,.35);border-radius:12px;max-height:260px;overflow-y:auto;
+  box-shadow:0 12px 30px rgba(0,0,0,.5);-webkit-overflow-scrolling:touch}
+#sugg li{padding:11px 12px;border-radius:8px;font-size:16px;font-weight:600;letter-spacing:.04em;color:#f1f5f9;cursor:pointer;
+  display:flex;justify-content:space-between;gap:12px}
+#sugg li small{color:var(--mut);font-weight:500;letter-spacing:0;font-size:13px}
+#sugg li.on,#sugg li:hover{background:rgba(239,68,68,.25)}
 #status{margin:0;font-size:14px;color:#d1d5db}
 #status.warn{color:var(--warn)}
 #recent{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px}
@@ -193,10 +200,10 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;
         <p>AMM görevleri uçağın FSN'ine göre listelenir.</p>
       </div>
       <div id="inputWrap">
-        <input type="text" id="tail" class="search-box" list="tails" placeholder="Örn. TC-JNC" autocomplete="off" autocapitalize="characters"
+        <input type="text" id="tail" class="search-box" placeholder="Örn. TC-JNC" autocomplete="off" autocapitalize="characters"
                autocorrect="off" spellcheck="false" enterkeyhint="search" aria-label="Kuyruk kodu">
         <button type="button" id="clearBtn" aria-label="Aramayı temizle" hidden>&times;</button>
-        <datalist id="tails"></datalist>
+        <ul id="sugg" role="listbox" hidden></ul>
       </div>
       <div id="info" hidden></div>
       <p id="status" aria-live="polite">Veriler yükleniyor...</p>
@@ -233,7 +240,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;
   <!-- Alt bilgi -->
   <div class="foot">
     <span id="foot1"></span>
-    <span>AMM Finder v1.3</span>
+    <span>AMM Finder v1.4</span>
   </div>
 </div>
 
@@ -377,7 +384,6 @@ function parseFleetTable(text) {
 function setFleet(recs, from) {
   state.fleetRecs = recs; state.fleetFrom = from; state.fleet = {};
   recs.forEach(r => state.fleet[norm(r.reg)] = {...r, type: (r.amm || '').toUpperCase() || typeOf(r.model)});
-  $('tails').innerHTML = Object.keys(state.fleet).map(t => `<option value="${esc(t)}">`).join('');
 }
 async function loadFleet() {
   let recs = [], from = '';
@@ -499,8 +505,42 @@ function syncSteps() {
   $('q').disabled = $('listAll').disabled = !ok;
 }
 $('tail').addEventListener('input', onTail);
-$('tail').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('tail').blur(); if (state.cur) $('chapter').focus(); } });
-$('clearBtn').addEventListener('click', () => { $('tail').value = ''; onTail(); $('tail').focus(); });
+// ---------- Kuyruk kodu önerileri (kendi listemiz; tarayıcının datalist'i yerine) ----------
+const sugg = {items: [], idx: -1};
+function hideSugg() { $('sugg').hidden = true; sugg.items = []; sugg.idx = -1; }
+function showSugg() {
+  const q = norm($('tail').value).replace(/[^A-Z0-9]/g, '').replace(/^TC/, '');
+  if (!q || !state.fleetRecs.length || state.fleet[normTail($('tail').value)]) { hideSugg(); return; }
+  const regs = Object.keys(state.fleet);
+  const starts = regs.filter(r => r.replace(/^TC-?/, '').startsWith(q));
+  const inc = regs.filter(r => !starts.includes(r) && r.replace(/^TC-?/, '').includes(q));
+  sugg.items = starts.concat(inc).slice(0, 8); sugg.idx = -1;
+  if (!sugg.items.length) { hideSugg(); return; }
+  $('sugg').innerHTML = sugg.items.map((r, i) => `<li role="option" data-i="${i}">${esc(r)}<small>${esc(state.fleet[r].model || '')}</small></li>`).join('');
+  $('sugg').hidden = false;
+}
+function pickSugg(i) {
+  const r = sugg.items[i]; if (!r) return;
+  $('tail').value = r; hideSugg(); onTail(); $('tail').blur();
+}
+function markSugg() { [...$('sugg').children].forEach((li, i) => li.classList.toggle('on', i === sugg.idx));
+  const on = $('sugg').children[sugg.idx]; if (on) on.scrollIntoView({block: 'nearest'}); }
+$('tail').addEventListener('input', showSugg);
+$('tail').addEventListener('focus', showSugg);
+$('tail').addEventListener('blur', () => setTimeout(hideSugg, 120));
+$('sugg').addEventListener('pointerdown', e => { const li = e.target.closest('li'); if (!li) return; e.preventDefault(); pickSugg(+li.dataset.i); });
+$('tail').addEventListener('keydown', e => {
+  const open = !$('sugg').hidden && sugg.items.length;
+  if (e.key === 'ArrowDown' && open) { e.preventDefault(); sugg.idx = (sugg.idx + 1) % sugg.items.length; markSugg(); }
+  else if (e.key === 'ArrowUp' && open) { e.preventDefault(); sugg.idx = (sugg.idx - 1 + sugg.items.length) % sugg.items.length; markSugg(); }
+  else if (e.key === 'Escape') { hideSugg(); }
+  else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (open) { pickSugg(sugg.idx >= 0 ? sugg.idx : 0); return; }       // liste açıkken Enter: seçili (yoksa ilk) öneriyi al
+    $('tail').blur(); if (state.cur) $('chapter').focus();
+  }
+});
+$('clearBtn').addEventListener('click', () => { $('tail').value = ''; hideSugg(); onTail(); $('tail').focus(); });
 $('chapter').addEventListener('change', () => { syncSteps(); if ($('chapter').value) $('q').focus(); render(false); });
 $('q').addEventListener('input', () => render(false));
 $('q').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('q').blur(); } });
