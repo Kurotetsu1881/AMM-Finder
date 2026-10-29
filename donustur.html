@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>AMM Finder – Veri Dönüştürücü</title>
+<style>
+  html{background:#0b1220}
+  body{margin:0;font-family:Inter,system-ui,Segoe UI,Arial,sans-serif;color:#e5e7eb;padding:24px 16px}
+  .box{max-width:720px;margin:0 auto;background:rgba(15,23,42,.9);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:22px}
+  h1{margin:0 0 6px;font-size:22px;color:#f97316}
+  p{color:#9ca3af;line-height:1.5;margin:6px 0}
+  #drop{margin:16px 0;border:2px dashed #475569;border-radius:14px;padding:34px 16px;text-align:center;cursor:pointer}
+  #drop.on{border-color:#ef4444;background:rgba(239,68,68,.08)}
+  button{background:#ef4444;color:#fff;border:0;border-radius:10px;padding:10px 16px;font-weight:600;cursor:pointer}
+  ul{padding-left:18px;line-height:1.7} li.ok{color:#86efac} li.err{color:#fca5a5}
+  code{background:#1e293b;padding:1px 6px;border-radius:5px}
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>Veri Dönüştürücü</h1>
+  <p>Dosya olarak (çift tıklayarak) açılan AMM Finder, klasördeki <code>.csv</code> / <code>.json</code> dosyalarını doğrudan okuyamaz; <code>.js</code> dosyalarını okur.
+     Bu sayfa dönüşümü tek adımda yapar. GitHub / web adresi üzerinden kullanırken bu sayfaya ihtiyacınız yoktur; yalnızca index.html'i bilgisayarda çift tıklayarak açıyorsanız gereklidir.</p>
+  <div id="drop"><b>Dosyaları buraya sürükleyin</b><br><span style="color:#9ca3af">veya tıklayıp seçin: <code>filo.csv</code>, <code>amm_….json</code></span>
+    <input id="f" type="file" accept=".csv,.txt,.json" multiple hidden></div>
+  <ul id="log"></ul>
+  <p>İnen dosyaları <code>index.html</code>'in bulunduğu klasöre koyun (eskilerin üstüne yazın).</p>
+</div>
+<script>
+const log = (t, c) => { const li = document.createElement('li'); li.className = c || ''; li.textContent = t; document.getElementById('log').appendChild(li); };
+const save = (name, text) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], {type: 'text/javascript'}));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove(); };
+const seen = {};
+async function handle(files) {
+  document.getElementById('log').innerHTML = '';
+  for (const f of files) {
+    try {
+      const txt = await f.text();
+      if (/\.json$/i.test(f.name)) {
+        const j = JSON.parse(txt);
+        if (!j.meta || !Array.isArray(j.tasks)) throw new Error('AMM tarama dosyası değil');
+        const t = String(j.meta.type || 'UNKNOWN').toUpperCase();
+        seen[t] = (seen[t] || 0) + 1;
+        const name = seen[t] === 1 ? `amm_${t}.js` : `amm_${t}_${seen[t]}.js`;
+        save(name, '(window.AMM_PARTS=window.AMM_PARTS||[]).push(' + txt.trim() + ');\n');
+        log(`${f.name} → ${name} (REV:${j.meta.revNum || '?'}, ${j.tasks.length} görev)`, 'ok');
+      } else {
+        save('filo.js', 'window.FILO_CSV=' + JSON.stringify(txt) + ';\n');
+        log(`${f.name} → filo.js (${txt.split(/\r?\n/).filter(x => x.trim()).length - 1} satır)`, 'ok');
+      }
+      await new Promise(r => setTimeout(r, 400));
+    } catch (e) { log(`${f.name}: ${e.message}`, 'err'); }
+  }
+}
+const drop = document.getElementById('drop'), inp = document.getElementById('f');
+drop.onclick = () => inp.click();
+inp.onchange = () => handle([...inp.files]);
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('on'); };
+drop.ondragleave = () => drop.classList.remove('on');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('on'); handle([...e.dataTransfer.files]); };
+</script>
+</body>
+</html>
