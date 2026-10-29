@@ -29,7 +29,7 @@
     if (!revNum) return console.error('Revizyon bilgisi olmadan tarama iptal edildi.');
   }
   console.log(`%c${type} AMM · REV:${revNum} · ${revDate} · önek: ${PREFIX}`, 'font-weight:bold');
-  console.log('Not: konsoldaki kırmızı "404" satırları normaldir (olmayan chapter\'lar). Durdurmak için: window.__stop = true');
+  console.log('Not: konsoldaki kırmızı "404" satırları normaldir (olmayan chapter\'lar, motor harfi denemeleri). Durdurmak için: window.__stop = true');
 
   const pageUrl = new URL(location.href);
   if (!/_EN\d{12,}$/.test(pageUrl.searchParams.get('itemId') || '')) {
@@ -66,7 +66,10 @@
   const resumed = Object.keys(saved);
   if (resumed.length) console.log(`Önceki taramadan ${resumed.length} chapter hazır (${resumed.join(',')}), tekrar indirilmeyecek.`);
 
-  const all = CHAPTERS === 'ALL' ? Array.from({length: 95}, (_, i) => String(i + 5).padStart(2, '0')) : CHAPTERS;
+  // Motor chapter'ları (70-80) üretici koduna göre ayrılır (GE/PW/RR): kök kimlik "<önek>_EN79K" gibidir, harfi kod kendisi bulur.
+  const base = CHAPTERS === 'ALL' ? Array.from({length: 95}, (_, i) => String(i + 5).padStart(2, '0')) : CHAPTERS;
+  const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+  const all = base.flatMap(c => (/^7\d$|^80$/.test(c) ? LETTERS.map(l => c + l) : [c]));
   const done = new Map(Object.entries(saved));                        // ch -> görev dizisi
   const todoList = all.filter(c => !done.has(c));
   const skipCh = [], badCh = [];
@@ -134,6 +137,11 @@
       else s.failed.push(job.id);
     } else {
       if (job.root && !((j.childTocItems || []).length || (j.listSolutions || []).length)) s.empty = true;
+      if (job.root && /^\d\d[A-Z]$/.test(job.ch)) {                // motor chapter'ı: üreticiyi başlıktan oku
+        const m = /\(([A-Z]{2,4})\)/.exec((j.childTocItems || []).map(c => c.title || '').join(' ') + ' ' + (j.title || ''));
+        s.eng = m ? m[1] : '';
+        if (!s.empty) console.log(`Motor chapter bulundu: ${job.ch} → ${s.eng || '?'}`);
+      }
       (j.childTocItems || []).forEach(c => {
         if (c.id && !s.seen.has(c.id)) { s.seen.add(c.id); s.pending++; queue.push({ch: job.ch, id: c.id}); }
       });
@@ -155,7 +163,7 @@
     if (s.flushed || !s.finished) return; s.flushed = true;
     if (s.empty) { skipCh.push(ch); return; }
     if (s.failed.length) return;                           // eksik: ikinci turda denenecek
-    done.set(ch, [...s.mine.values()]);
+    done.set(ch, [...s.mine.values()].map(t => s.eng ? {...t, eng: s.eng} : t));
     await IDB.set(KEY, Object.fromEntries(done));
     console.log(`✔ Chapter ${ch} tamam: ${s.mine.size} görev`);
   };
@@ -193,7 +201,7 @@
   const okCh = [...done.keys()].sort();
   const rows = okCh.flatMap(c => done.get(c)).sort((a, b) => a.ref.localeCompare(b.ref) || a.rev.localeCompare(b.rev));
   const out = {meta: {type, revNum, revDate, prefix: PREFIX, linkTemplate, pageTitle: document.title,
-                      exported: new Date().toISOString(), chapters: okCh, count: rows.length}, tasks: rows};
+                      exported: new Date().toISOString(), chapters: [...new Set(okCh.map(k => k.slice(0, 2)))], count: rows.length}, tasks: rows};
   const complete = !badCh.length && CHAPTERS === 'ALL';
   const fname = complete ? `amm_${type}.json` : `amm_${type}_PARCA.json`;
   const a = document.createElement('a');

@@ -1,4 +1,4 @@
-AMM FINDER v1.2 - KULLANIM
+AMM FINDER v1.3 - KULLANIM
 
 KLASÖRDE (GitHub'daki AMM Finder klasörü) OLMASI GEREKENLER
   Sayfa dosyaları : index.html, sw.js, manifest.webmanifest, background.jpg,
@@ -13,3 +13,6 @@ YENİ REVİZYON: tarama kodunu tekrar çalıştırıp inen json'u eskisinin üst
 
 TARAMA KODU (tarama-kodu.txt): HER UÇAK TİPİ İÇİN AYNI KOD. İlgili tipin AMM sayfasında bir görev açıp
 F12 > Console'a yapıştırın. Tip ve dosya adı (amm_<TİP>.json) sayfadan otomatik gelir.
+
+MOTOR CHAPTER'LARI (70-80): Airbus bunları GE / PW / RR diye ayırır. Tarama kodu hepsini bulup "eng" etiketiyle kaydeder;
+sayfa uçağın Engine Model değerine göre (CF6=GE, PW4000=PW, Trent=RR) sadece uygun motorun görevlerini gösterir.

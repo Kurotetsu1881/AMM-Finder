@@ -233,7 +233,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;
   <!-- Alt bilgi -->
   <div class="foot">
     <span id="foot1"></span>
-    <span>AMM Finder v1.2</span>
+    <span>AMM Finder v1.3</span>
   </div>
 </div>
 
@@ -482,7 +482,8 @@ async function onTail() {
   info.innerHTML = head +
     `<div class="l2">${esc(rec.type)} AMM${ri.text ? ' · <b>' + esc(ri.text) + '</b>' : ''} · ${nf(d.tasks.length)} görev</div>` +
     (!rec.fsn && state.fleetRecs.length ? `<div class="w">Bu uçak için FSN yok, effectivity filtresi uygulanmıyor.</div>` : '') +
-    (ri.warn ? `<div class="w">${esc(ri.warn)}</div>` : '');
+    (ri.warn ? `<div class="w">${esc(ri.warn)}</div>` : '') +
+    (!engFam(rec.engine) && d.tasks.some(x => x.eng) ? `<div class="w">Motor modeli tanınmadı, 70-80 chapter'larında tüm motor üreticilerinin görevleri gösteriliyor.</div>` : '');
   const pill = $('revPill');
   if (ri.short) { pill.hidden = false; pill.textContent = `${rec.type} · ${ri.short}`; pill.className = 'pill'; }
   fillChapters([...new Set(d.tasks.map(x => x.ch))].sort(), $('chapter').value);
@@ -506,6 +507,14 @@ $('q').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefa
 $('listAll').addEventListener('click', () => render(true));
 $('showAll').addEventListener('change', () => render(false));
 
+// Motor üreticisi: filodaki "Engine Model" değerinden (CF6→GE, PW4000→PW, Trent→RR)
+const engFam = e => { e = String(e || '').toUpperCase();
+  if (/CF6|GE90|GENX|\bGE\b/.test(e)) return 'GE';
+  if (/CFM|LEAP/.test(e)) return 'CFM';
+  if (/V25/.test(e)) return 'IAE';
+  if (/PW|PRATT|JT9/.test(e)) return 'PW';
+  if (/TRENT|RB211|ROLLS|\bRR\b/.test(e)) return 'RR';
+  return ''; };
 const fsnOk = (t, fsn) => !fsn || !t.fsn || t.fsn.some(([a, b]) => fsn >= a && fsn <= b);
 
 function render(force) {
@@ -517,9 +526,11 @@ function render(force) {
   const {rec, d} = state.cur;
   if (!d) { none(); $('emptyState').hidden = false; $('emptyState').textContent = 'AMM verisi yükleniyor…'; return; }
   const showAll = $('showAll').checked;
+  const fam = engFam(rec.engine);
   const hits = []; let hidden = 0;
   d.tasks.forEach(t => {
     if (ch !== 'ALL' && t.ch !== ch) return;
+    if (t.eng && fam && t.eng !== fam) return;                // başka üreticinin motor görevi
     if (words.length) { const h = t._h || (t._h = norm(t.title + ' ' + t.ref)); if (!words.every(w => h.includes(w))) return; }
     const ok = fsnOk(t, rec.fsn);
     if (!ok && !showAll) { hidden++; return; }
@@ -547,10 +558,11 @@ function render(force) {
     const rv = (d.chInfo[t.ch] || {}).revNum;
     const badge = !rec.fsn ? '' : !ok ? `<span class="tag bad">FSN ${rec.fsn} için geçerli değil</span>`
       : t.fsn ? `<span class="tag ok">FSN ${rec.fsn} ✓</span>` : `<span class="tag">tüm uçaklar</span>`;
+    const engTag = t.eng ? `<span class="tag">${esc(t.eng)} motor</span>` : '';
     const eff = t.app ? esc(t.app.replace(/^[*\s]*/, '')) : (t.note ? esc(t.note) : '');
     return `<article class="res${ok ? '' : ' dim'}">
       <div class="t">${esc(t.title)}</div>
-      <div class="m"><span class="ref">AMM:${esc(ref)}</span>${rv ? `<span class="tag">REV:${esc(rv)}</span>` : ''}${badge}</div>
+      <div class="m"><span class="ref">AMM:${esc(ref)}</span>${rv ? `<span class="tag">REV:${esc(rv)}</span>` : ''}${engTag}${badge}</div>
       ${eff ? `<div class="eff">Eff: ${eff}</div>` : ''}
       ${t.unk ? `<div class="w">Effectivity ayrıştırılamadı — AMM'de kontrol edin.</div>` : ''}
       <div class="acts">
