@@ -1,12 +1,12 @@
-AMM FINDER v1.4 - KULLANIM
+AMM FINDER v1.5 - KULLANIM
 
 KLASÖRDE (GitHub'daki AMM Finder klasörü) OLMASI GEREKENLER
   Sayfa dosyaları : index.html, sw.js, manifest.webmanifest, background.jpg,
-                    icon-v2-180.png, icon-v2-192.png, icon-v2-512.png, icon-v2-maskable-512.png
+                    icons/ klasörü (favicon, logo, ana ekran ikonları - klasörüyle birlikte yükleyin)
   Filo            : filo.csv
   AMM verileri    : amm_A330.json, amm_A320.json, amm_A340.json, amm_A350.json
                     (büyük dosya parçalanırsa amm_A330_2.json, amm_A330_3.json ...)
-  Eski ikonlar (icon-192.png, icon-512.png, icon-maskable-512.png) ve filo.js SİLİNEBİLİR.
+  Eski ikonlar (icon-*.png, icon-v2-*.png) ve filo.js SİLİNEBİLİR.
 
 REVİZYON (REV:84 ve tarih) elle yazılmaz: tarama kodu Airbus sayfa başlığından okur, json'un içine yazar.
 YENİ REVİZYON: tarama kodunu tekrar çalıştırıp inen json'u eskisinin üstüne yükleyin. Başka işlem yok.

@@ -1,6 +1,6 @@
 // AMM Finder — çevrimdışı önbellek (yalnızca http/https üzerinde çalışır)
-const V = 'amm-finder-v2';
-const CORE = ['./', 'index.html', 'background.jpg', 'manifest.webmanifest', 'icon-v2-192.png', 'icon-v2-512.png'];
+const V = 'amm-finder-v3';
+const CORE = ['./', 'index.html', 'background.jpg', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/favicon.svg'];
 
 self.addEventListener('install', e => {
   e.waitUntil((async () => {
