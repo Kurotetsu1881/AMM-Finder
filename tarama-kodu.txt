@@ -26,10 +26,12 @@
   // Revizyon numarası ve tarihi SAYFA BAŞLIĞINDAN okunur ("... Rev. num: 84 - 01-Oct-2026 ...")
   const rm = /Rev\.?\s*num:?\s*(\d+)\s*-\s*(\d{1,2}-[A-Za-z]{3}-\d{4})/i.exec(document.title);
   let revNum = rm ? rm[1] : null, revDate = rm ? rm[2] : null;
-  if (!revNum) {
-    revNum = (prompt('Revizyon numarası bulunamadı. Kapak sayfasındaki "Revision number" değerini yazın:') || '').trim();
-    revDate = (prompt('Revizyon tarihi (örn. 01-Oct-2026):') || '').trim();
-    if (!revNum) return console.error('Revizyon bilgisi olmadan tarama iptal edildi.');
+  if (!revNum) {                                           // başlıkta "Rev. num" yoksa: tarihi başlıktan al, numarayı sor
+    const dm = /(\d{1,2}-[A-Za-z]{3}-\d{4})/.exec(document.title);
+    revDate = revDate || (dm ? dm[1] : '');
+    const ans = (prompt('Revizyon numarası sayfa başlığında bulunamadı.\nKapaktaki "Revision number" değerini yazın. Bilmiyorsanız boş bırakın, tarih (' + (revDate || '?') + ') kullanılır:', '') || '').trim();
+    revNum = ans || revDate;
+    if (!revNum) return console.error('Revizyon bilgisi bulunamadı, tarama iptal edildi.');
   }
   console.log(`%c${type} AMM · REV:${revNum} · ${revDate} · önek: ${PREFIX}`, 'font-weight:bold');
   console.log('Not: konsoldaki kırmızı "404" satırları normaldir (olmayan chapter\'lar, motor harfi denemeleri). Durdurmak için: window.__stop = true');

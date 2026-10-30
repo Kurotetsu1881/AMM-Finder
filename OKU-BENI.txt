@@ -1,4 +1,4 @@
-AMM FINDER v1.6 - KULLANIM
+AMM FINDER v1.7 - KULLANIM
 
 KLASÖRDE (GitHub'daki AMM Finder klasörü) OLMASI GEREKENLER
   Sayfa dosyaları : index.html, sw.js, manifest.webmanifest, background.jpg,
@@ -16,3 +16,8 @@ F12 > Console'a yapıştırın. Tip ve dosya adı (amm_<TİP>.json) sayfadan oto
 
 MOTOR CHAPTER'LARI (70-80): Airbus bunları GE / PW / RR diye ayırır. Tarama kodu hepsini bulup "eng" etiketiyle kaydeder;
 sayfa uçağın Engine Model değerine göre (CF6=GE, PW4000=PW, Trent=RR) sadece uygun motorun görevlerini gösterir.
+
+A350: tarama-A350.txt (A350 portalı S1000D yapıda olduğu için ayrı kod). A350'de geçerlilik MSN'e göre yazılır;
+sayfa filodaki MSN sütununu kullanır. İlk çalıştırmada kod sadece chapter 25'i indirir (deneme); doğruysa kodun başındaki
+CHAPTERS satırını 'ALL' yapıp tekrar çalıştırın. Çıkan dosya amm_A350.json olarak klasöre konur.
+A320/A330/A340 için tarama-kodu.txt kullanılır.

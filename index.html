@@ -201,7 +201,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;
     <div id="searchPanel" class="glass">
       <div id="heroText">
         <h2>Uçağın kuyruk kodunu yazın</h2>
-        <p>AMM görevleri uçağın FSN'ine göre listelenir.</p>
+        <p>AMM görevleri uçağın FSN / MSN bilgisine göre listelenir.</p>
       </div>
       <div id="inputWrap">
         <input type="text" id="tail" class="search-box" placeholder="Örn. TC-JNC" autocomplete="off" autocapitalize="characters"
@@ -225,7 +225,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;
           <span id="countWrap" hidden><strong id="resultCount">0</strong> sonuç</span>
           <span id="hiddenNote" style="color:#9ca3af"></span>
           <span class="spacer"></span>
-          <label><input id="showAll" type="checkbox"> FSN'e uymayanları da göster</label>
+          <label><input id="showAll" type="checkbox"> Uymayanları da göster</label>
           <button id="listAll" class="linkbtn">Bölümü tamamen listele</button>
         </div>
       </div>
@@ -244,7 +244,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;
   <!-- Alt bilgi -->
   <div class="foot">
     <span id="foot1"></span>
-    <span>AMM Finder v1.6</span>
+    <span>AMM Finder v1.7</span>
   </div>
 </div>
 
@@ -280,7 +280,7 @@ const db = {
 function revInfo(d) {
   const arr = Object.values(d.chInfo || {}).filter(x => x && x.revNum);
   if (!arr.length) return {text: '', short: '', warn: ''};
-  const revs = [...new Set(arr.map(x => +x.revNum))].sort((a, b) => a - b);
+  const revs = [...new Set(arr.map(x => String(x.revNum)))].sort((a, b) => (isNaN(a) || isNaN(b)) ? a.localeCompare(b) : a - b);
   if (revs.length === 1) { const short = `REV:${revs[0]}`; return {short, text: short + (arr[0].revDate ? ` (${arr[0].revDate})` : ''), warn: ''}; }
   const short = `REV:${revs[0]}–${revs[revs.length - 1]}`;
   return {short, text: short + ' (karışık)', warn: "Chapter'ler farklı revizyonlardan alınmış."};
@@ -491,7 +491,7 @@ async function onTail() {
   const ri = revInfo(d);
   info.innerHTML = head +
     `<div class="l2">${esc(rec.type)} AMM${ri.text ? ' · <b>' + esc(ri.text) + '</b>' : ''} · ${nf(d.tasks.length)} görev</div>` +
-    (!rec.fsn && state.fleetRecs.length ? `<div class="w">Bu uçak için FSN yok, effectivity filtresi uygulanmıyor.</div>` : '') +
+    (state.fleetRecs.length && !(d.tasks.some(x => x.msn) ? parseInt(rec.msn, 10) : rec.fsn) ? `<div class="w">Bu uçak için ${d.tasks.some(x => x.msn) ? 'MSN' : 'FSN'} yok, effectivity filtresi uygulanmıyor.</div>` : '') +
     (ri.warn ? `<div class="w">${esc(ri.warn)}</div>` : '') +
     (!engFam(rec.engine) && d.tasks.some(x => x.eng) ? `<div class="w">Motor modeli tanınmadı, 70-80 chapter'larında tüm motor üreticilerinin görevleri gösteriliyor.</div>` : '');
   const pill = $('revPill');
@@ -559,7 +559,10 @@ const engFam = e => { e = String(e || '').toUpperCase();
   if (/PW|PRATT|JT9/.test(e)) return 'PW';
   if (/TRENT|RB211|ROLLS|\bRR\b/.test(e)) return 'RR';
   return ''; };
-const fsnOk = (t, fsn) => !fsn || !t.fsn || t.fsn.some(([a, b]) => fsn >= a && fsn <= b);
+const effLabel = rec => (state.cur && state.cur.d && state.cur.d.tasks.some(x => x.msn)) ? `MSN ${parseInt(rec.msn, 10) || ''}` : `FSN ${rec.fsn || ''}`;
+// Geçerlilik: Airbus A320/A330/A340 görevleri FSN'e, A350 görevleri MSN'e göre yazılır.
+const keyOf = (t, rec) => t.msn ? {k: 'MSN', v: parseInt(rec.msn, 10) || null, r: t.msn} : {k: 'FSN', v: rec.fsn, r: t.fsn};
+const effOk = (t, rec) => { const e = keyOf(t, rec); return !e.v || !e.r || e.r.some(([a, b]) => e.v >= a && e.v <= b); };
 
 function render(force) {
   const box = $('results'), ch = $('chapter').value;
@@ -576,7 +579,7 @@ function render(force) {
     if (ch !== 'ALL' && t.ch !== ch) return;
     if (t.eng && fam && t.eng !== fam) return;                // başka üreticinin motor görevi
     if (words.length) { const h = t._h || (t._h = norm(t.title + ' ' + t.ref)); if (!words.every(w => h.includes(w))) return; }
-    const ok = fsnOk(t, rec.fsn);
+    const ok = effOk(t, rec);
     if (!ok && !showAll) { hidden++; return; }
     hits.push({t, ok});
   });
@@ -584,14 +587,14 @@ function render(force) {
   const nOk = hits.filter(h => h.ok).length;
   $('countWrap').hidden = false;
   $('resultCount').textContent = nf(nOk);
-  $('hiddenNote').textContent = hidden ? `· ${nf(hidden)} görev FSN ${rec.fsn} için geçerli olmadığından gizlendi` : '';
+  $('hiddenNote').textContent = hidden ? `· ${nf(hidden)} görev ${effLabel(rec)} için geçerli olmadığından gizlendi` : '';
   if (nOk > 0) pushRecent(rec.reg);
   if (!hits.length) {
     $('resultsWrap').hidden = true; box.innerHTML = '';
     const q = esc($('q').value.trim());
     $('emptyState').hidden = false;
     $('emptyState').innerHTML = `${q ? '<b>' + q + '</b> için ' : ''}${ch === 'ALL' ? 'hiçbir chapter\'da' : esc(ch) + '. chapter\'da'} sonuç bulunamadı.` +
-      (hidden ? `<br><span style="color:#9ca3af">${nf(hidden)} görev bulundu ama FSN ${rec.fsn} için geçerli değil. "FSN'e uymayanları da göster"i işaretleyebilirsiniz.</span>` : '');
+      (hidden ? `<br><span style="color:#9ca3af">${nf(hidden)} görev bulundu ama ${effLabel(rec)} için geçerli değil. "Uymayanları da göster"i işaretleyebilirsiniz.</span>` : '');
     return;
   }
   $('emptyState').hidden = true; $('resultsWrap').hidden = false;
@@ -600,18 +603,19 @@ function render(force) {
     const ref = `${t.ref}${t.rev ? '-' + t.rev : ''}`;
     const href = tpl.startsWith('https://') ? tpl.replace('{ID}', encodeURIComponent(t.id)) : '';
     const rv = (d.chInfo[t.ch] || {}).revNum;
-    const badge = !rec.fsn ? '' : !ok ? `<span class="tag bad">FSN ${rec.fsn} için geçerli değil</span>`
-      : t.fsn ? `<span class="tag ok">FSN ${rec.fsn} ✓</span>` : `<span class="tag">tüm uçaklar</span>`;
+    const ek = keyOf(t, rec);
+    const badge = !ek.v ? '' : !ok ? `<span class="tag bad">${ek.k} ${ek.v} için geçerli değil</span>`
+      : ek.r ? `<span class="tag ok">${ek.k} ${ek.v} ✓</span>` : `<span class="tag">tüm uçaklar</span>`;
     const engTag = t.eng ? `<span class="tag">${esc(t.eng)} motor</span>` : '';
     const eff = t.app ? esc(t.app.replace(/^[*\s]*/, '')) : (t.note ? esc(t.note) : '');
     return `<article class="res${ok ? '' : ' dim'}">
       <div class="t">${esc(t.title)}</div>
-      <div class="m"><span class="ref">AMM:${esc(ref)}</span>${rv ? `<span class="tag">REV:${esc(rv)}</span>` : ''}${engTag}${badge}</div>
+      <div class="m"><span class="ref">${esc(t.pf || 'AMM')}:${esc(ref)}</span>${rv ? `<span class="tag">REV:${esc(rv)}</span>` : ''}${engTag}${badge}</div>
       ${eff ? `<div class="eff">Eff: ${eff}</div>` : ''}
       ${t.unk ? `<div class="w">Effectivity ayrıştırılamadı — AMM'de kontrol edin.</div>` : ''}
       <div class="acts">
         ${href ? `<a class="btn pri" href="${esc(href)}" target="_blank" rel="noopener noreferrer">AMM'de aç</a>` : ''}
-        <button class="btn copy" data-ref="AMM:${esc(t.ref)}">Kopyala</button>
+        <button class="btn copy" data-ref="${esc(t.pf || 'AMM')}:${esc(t.ref)}">Kopyala</button>
       </div></article>`;
   }).join('') + (hits.length > MAX_SHOW ? `<div class="more">İlk ${MAX_SHOW} sonuç gösteriliyor, aramayı daraltın.</div>` : '');
 }
