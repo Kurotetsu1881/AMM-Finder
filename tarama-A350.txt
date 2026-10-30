@@ -4,7 +4,7 @@
 // Bittiğinde "amm_<TİP>.json" dosyası otomatik iner (örn. amm_A330.json). Onu AMM Finder klasörüne koyun, başka bir şey yapmayın.
 (async () => {
   // ===== AYARLAR =====
-  const CHAPTERS = ['ALL'];   // İLK DENEME: sadece 25. Sonuç doğruysa bunu 'ALL' yapıp tekrar çalıştırın (25 tekrar indirilmez)
+  const CHAPTERS = 'ALL';   // tüm chapter'lar. Sadece deneme için ['25'] yazılabilir (biten chapter'lar bir sonraki çalıştırmada tekrar indirilmez)
   const CONCURRENCY = 8;      // aynı anda kaç istek (6-12 arası uygundur; sunucu zorlanırsa kod kendisi yavaşlar)
   const TYPE_OVERRIDE = '';   // Boş bırakın: uçak tipi sayfadan otomatik okunur. Dosya adını elle belirlemek için örn. 'A320'
   const RESUME = true;        // true: yarım kalan tarama aynı revizyonsa kaldığı yerden devam eder
@@ -80,6 +80,7 @@
   const done = new Map(Object.entries(saved).filter(([, v]) => Array.isArray(v) && v.length));   // boş kayıtlar geçersiz sayılır                        // ch -> görev dizisi
   const todoList = all.filter(c => !done.has(c));
   const skipCh = [], badCh = [];
+  const stat = {};                                        // HTTP durum kodu sayaçları (teşhis için)
   let skipped = 0, nReq = 0, nErr = 0, limit = CONCURRENCY, okStreak = 0, pauseUntil = 0, lastSlow = 0;
   const t0 = Date.now();
   window.__stop = false;
@@ -125,6 +126,7 @@
       try {
         nReq++;
         const r = await fetch(BASE + encodeURIComponent(id), {credentials: 'include'});
+        stat[r.status] = (stat[r.status] || 0) + 1;
         if (r.status === 404) return {notFound: true};
         if (r.status === 429 || r.status >= 500) {
           nErr++; okStreak = 0;
@@ -160,7 +162,11 @@
     const s = st.get(job.ch);
     const j = await getJson(job.id);
     if (!j || j.notFound) {
-      if (job.root) { s.empty = true; }
+      if (job.root) {
+        const alt = `${PREFIX}_${+job.ch}___`;                // "05___" yoksa "5___" yazımı da denenir
+        if (j && j.notFound && !job.tried && alt !== job.id) { s.pending++; queue.push({ch: job.ch, id: alt, root: true, tried: true}); }
+        else s.empty = true;
+      }
       else s.failed.push(job.id);
     } else {
       if (job.root && !((j.childTocItems || []).length || (j.listSolutions || []).length)) s.empty = true;
@@ -210,16 +216,15 @@
   };
   await Promise.all(Array.from({length: CONCURRENCY}, (_, i) => pool(i)));
 
-  // ---- ikinci tur: başarısız düğümleri yavaşça tekrar dene ----
-  if (!window.__stop) {
+  // ---- tekrar turları: başarısız düğümleri yavaşça (en çok 3 tur) tekrar dene ----
+  for (let round = 1; round <= 3 && !window.__stop; round++) {
     const retry = [...st.entries()].filter(([, s]) => !s.empty && s.failed.length);
-    if (retry.length) {
-      console.warn(`${retry.length} chapter'da alınamayan düğümler var, 3 sn sonra tekrar deneniyor...`);
-      await sleep(3000); limit = 3; pauseUntil = 0;
-      retry.forEach(([ch, s]) => { s.flushed = false; s.finished = false; s.seen = s.seen; s.pending = s.failed.length;
-        s.failed.splice(0).forEach(id => queue.push({ch, id})); });
-      await Promise.all(Array.from({length: 3}, (_, i) => pool(i)));
-    }
+    if (!retry.length) break;
+    console.warn(`Tur ${round}: ${retry.length} chapter'da alınamayan düğümler var (HTTP: ${JSON.stringify(stat)}), ${3 * round} sn sonra tekrar deneniyor...`);
+    await sleep(3000 * round); limit = 3; pauseUntil = 0;
+    retry.forEach(([ch, s]) => { s.flushed = false; s.finished = false; s.pending = s.failed.length;
+      s.failed.splice(0).forEach(id => queue.push({ch, id})); });
+    await Promise.all(Array.from({length: 3}, (_, i) => pool(i)));
   }
   for (const [ch, s] of st) {
     if (!s.finished) { badCh.push(ch); continue; }
@@ -227,6 +232,12 @@
     if (!s.empty && s.failed.length) { badCh.push(ch); console.warn(`Chapter ${ch} EKSİK kaldı (${s.failed.length} düğüm alınamadı), dosyaya girmeyecek.`); }
   }
 
+  {                                                        // chapter durum tablosu
+    const lines = [...st.entries()].map(([ch, s]) => done.has(ch) ? null :
+      `${ch}: ${s.empty ? 'kök bulunamadı (yok)' : !s.finished ? 'BİTMEDİ' : s.failed.length ? `EKSİK (${s.failed.length} düğüm alınamadı)` : !s.mine.size ? '0 görev' : 'kaydedilmedi'}`).filter(Boolean);
+    console.log('Alınan HTTP durumları:', JSON.stringify(stat));
+    console.log('Dosyada OLMAYAN chapter\'lar ve nedenleri:\n' + (lines.join('\n') || '(yok)'));
+  }
   if (!done.size) return console.error('Tamamlanan chapter yok, dosya oluşmadı.');
   const okCh = [...done.keys()].sort();
   const rows = okCh.flatMap(c => done.get(c)).sort((a, b) => a.ref.localeCompare(b.ref) || a.rev.localeCompare(b.rev));
@@ -242,6 +253,7 @@
   console.log(`%cBİTTİ: ${rows.length} görev, ${nReq} istek, ${mins} dk, ${skipped} atlanan kayıt. Chapter: ${okCh.join(',')} · atlanan sistem tanımı/şema kaydı: ${nSD}`, 'font-weight:bold;color:green');
   if (complete) { await IDB.del(KEY); console.log(`İnen dosya: ${fname} → AMM Finder klasörüne koyun (GitHub'a yükleyin).`); }
   else {
+    if (CHAPTERS !== 'ALL') console.warn("Not: CHAPTERS değeri 'ALL' değil, bu yüzden dosya PARCA olarak indi.");
     console.warn(`Dosya tam değil (${fname}). Eksik/yarım chapter'lar: ${JSON.stringify(badCh)}. Kodu AYNI SAYFADA tekrar çalıştırın: biten chapter'lar tekrar indirilmez, sadece eksikler denenir ve tam dosya (amm_${type}.json) iner.`);
   }
 })();
