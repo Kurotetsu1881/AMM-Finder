@@ -67,8 +67,9 @@
     async set(k, v) { try { const d = await this.open(); await new Promise(res => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = res; }); } catch (e) {} },
     async del(k) { try { const d = await this.open(); await new Promise(res => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').delete(k); t.oncomplete = res; t.onerror = res; }); } catch (e) {} }
   };
-  const KEY = `ammscan|${PREFIX}|${revNum}`;
-  const saved = RESUME ? ((await IDB.get(KEY)) || {}) : {};          // {chapter: [görevler]}
+  const KEY = `ammscan350v2|${PREFIX}|${revNum}`;
+  const saved0 = RESUME ? ((await IDB.get(KEY)) || {}) : {};
+  const saved = Object.fromEntries(Object.entries(saved0).filter(([, v]) => v && v.length));   // 0 görevli eski sonuçlar tekrar denenir          // {chapter: [görevler]}
   const resumed = Object.keys(saved);
   if (resumed.length) console.log(`Önceki taramadan ${resumed.length} chapter hazır (${resumed.join(',')}), tekrar indirilmeyecek.`);
 
@@ -76,23 +77,41 @@
   const base = CHAPTERS === 'ALL' ? Array.from({length: 95}, (_, i) => String(i + 5).padStart(2, '0')) : CHAPTERS;
   const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
   const all = base;
-  const done = new Map(Object.entries(saved));                        // ch -> görev dizisi
+  const done = new Map(Object.entries(saved).filter(([, v]) => Array.isArray(v) && v.length));   // boş kayıtlar geçersiz sayılır                        // ch -> görev dizisi
   const todoList = all.filter(c => !done.has(c));
   const skipCh = [], badCh = [];
   let skipped = 0, nReq = 0, nErr = 0, limit = CONCURRENCY, okStreak = 0, pauseUntil = 0, lastSlow = 0;
   const t0 = Date.now();
   window.__stop = false;
 
-  let nSD = 0, sample = null;
+  // Görevler düğümde listSolutions içinde ya da listBusinessCategory[].solutions (SYSTEM DESCRIPTION / MAINTENANCE PROCEDURE...) içinde gelir.
+  // Yapı ne olursa olsun, görev koduna uyan her kaydı bulur.
+  const collect = (o, into, d = 0) => {
+    if (!o || typeof o !== 'object' || d > 9) return;
+    if (Array.isArray(o)) { o.forEach(x => collect(x, into, d + 1)); return; }
+    if (o.id && dmOf(o)) { addSol(o, into); return; }
+    Object.values(o).forEach(v => collect(v, into, d + 1));
+  };
+  let nSD = 0, sample = null, nodeSamples = 0;
+  const DMID = /(A350-[A-Z]-(\d{2})-\d{2}-[0-9A-Z]{2}-[0-9A-Z]{5}-([0-9A-Z]{3})[0-9A-Z]-[0-9A-Z])$/i;
+  // Bir kayıt görev mi? Önce başlıktan ("A350-A-… - Başlık"), olmazsa kimlikten ("<önek>_A350-A-…") okunur.
+  const dmOf = o => {
+    if (!o || !o.id) return null;
+    const m = DMC.exec(String(o.title || '').trim());
+    if (m) return {code: m[1], ch: m[2], info: m[3], title: m[4].trim()};
+    const k = DMID.exec(String(o.id));
+    if (k) return {code: k[1], ch: k[2], info: k[3], title: String(o.title || '').replace(/^\s*A350-\S+\s*-\s*/i, '').trim() || k[1]};
+    return null;
+  };
   const addSol = (s, into) => {
     if (!s) return;
-    const m = DMC.exec((s.title || '').trim());
-    if (m && s.id) {
-      if (m[3][0] === '0') { nSD++; }                                  // 0xx = sistem tanımı/şema: bakım görevi değil
-      else if (!into.has(s.id) && m[4].trim().toUpperCase() !== 'DELETED') {
+    const d = dmOf(s);
+    if (d) {
+      if (d.info[0] === '0') { nSD++; }                                // 0xx = sistem tanımı/şema: bakım görevi değil
+      else if (!into.has(s.id) && d.title.toUpperCase() !== 'DELETED') {
         const a = parseApp(s.applicability);
         if (!sample) { sample = {id: s.id, title: s.title, applicability: s.applicability}; console.log('Örnek kayıt:', JSON.stringify(sample), '→', JSON.stringify(a)); }
-        into.set(s.id, {id: s.id, ch: m[2], ref: m[1], rev: '', title: m[4].trim(), app: a.app, msn: a.msn, unk: a.unk, pf: 'MP'});
+        into.set(s.id, {id: s.id, ch: d.ch, ref: d.code, rev: '', title: d.title, app: a.app, msn: a.msn, unk: a.unk, pf: 'MP'});
       }
     } else if (s.title) skipped++;
     (s.solutions || []).forEach(x => addSol(x, into));
@@ -147,10 +166,15 @@
       if (job.root && !((j.childTocItems || []).length || (j.listSolutions || []).length)) s.empty = true;
       (j.childTocItems || []).forEach(c => {
         if (!c || !c.id) return;
-        if (DMC.test((c.title || '').trim())) { addSol(c, s.mine); return; }       // görev düğümü: indirilmez, doğrudan kaydedilir
+        if (dmOf(c)) { addSol(c, s.mine); return; }       // görev düğümü: indirilmez, doğrudan kaydedilir
         if (!s.seen.has(c.id)) { s.seen.add(c.id); s.pending++; queue.push({ch: job.ch, id: c.id}); }
       });
-      (j.listSolutions || []).forEach(x => addSol(x, s.mine));
+      collect(j.listSolutions, s.mine); collect(j.listBusinessCategory, s.mine);
+      if (nodeSamples < 4 && !job.root && ((j.listSolutions || []).length || !(j.childTocItems || []).length)) {   // teşhis için gerçek yapıdan örnekler
+        nodeSamples++;
+        console.log('TEŞHİS düğüm:', job.id, '| alanlar:', Object.keys(j).join(','), '| çocuk:', (j.childTocItems || []).length, '| listSolutions:', (j.listSolutions || []).length,
+          '| kategori:', (j.listBusinessCategory || []).length, '| bu düğümden görev:', s.mine.size);
+      }
     }
     s.pending--; finishCheck(job.ch);
   };
@@ -168,6 +192,7 @@
     if (s.flushed || !s.finished) return; s.flushed = true;
     if (s.empty) { skipCh.push(ch); return; }
     if (s.failed.length) return;                           // eksik: ikinci turda denenecek
+    if (!s.mine.size) { skipCh.push(ch); console.warn(`Chapter ${ch}: düğümler bulundu ama 0 görev çıktı, kaydedilmedi.`); return; }
     done.set(ch, [...s.mine.values()].map(t => s.eng ? {...t, eng: s.eng} : t));
     await IDB.set(KEY, Object.fromEntries(done));
     console.log(`✔ Chapter ${ch} tamam: ${s.mine.size} görev`);

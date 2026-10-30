@@ -75,7 +75,7 @@
   const base = CHAPTERS === 'ALL' ? Array.from({length: 95}, (_, i) => String(i + 5).padStart(2, '0')) : CHAPTERS;
   const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
   const all = base.flatMap(c => (/^7\d$|^80$/.test(c) ? LETTERS.map(l => c + l) : [c]));
-  const done = new Map(Object.entries(saved));                        // ch -> görev dizisi
+  const done = new Map(Object.entries(saved).filter(([, v]) => Array.isArray(v) && v.length));   // boş kayıtlar geçersiz sayılır                        // ch -> görev dizisi
   const todoList = all.filter(c => !done.has(c));
   const skipCh = [], badCh = [];
   let skipped = 0, nReq = 0, nErr = 0, limit = CONCURRENCY, okStreak = 0, pauseUntil = 0, lastSlow = 0;
@@ -168,6 +168,7 @@
     if (s.flushed || !s.finished) return; s.flushed = true;
     if (s.empty) { skipCh.push(ch); return; }
     if (s.failed.length) return;                           // eksik: ikinci turda denenecek
+    if (!s.mine.size) { skipCh.push(ch); console.warn(`Chapter ${ch}: düğümler bulundu ama 0 görev çıktı, kaydedilmedi.`); return; }
     done.set(ch, [...s.mine.values()].map(t => s.eng ? {...t, eng: s.eng} : t));
     await IDB.set(KEY, Object.fromEntries(done));
     console.log(`✔ Chapter ${ch} tamam: ${s.mine.size} görev`);

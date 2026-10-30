@@ -1,4 +1,4 @@
-AMM FINDER v1.7 - KULLANIM
+AMM FINDER v1.8 - KULLANIM
 
 KLASÖRDE (GitHub'daki AMM Finder klasörü) OLMASI GEREKENLER
   Sayfa dosyaları : index.html, sw.js, manifest.webmanifest, background.jpg,
