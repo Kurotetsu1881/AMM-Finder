@@ -4,7 +4,7 @@
 // Bittiğinde "amm_<TİP>.json" dosyası otomatik iner (örn. amm_A330.json). Onu AMM Finder klasörüne koyun, başka bir şey yapmayın.
 (async () => {
   // ===== AYARLAR =====
-  const CHAPTERS = ['25'];   // İLK DENEME: sadece 25. Sonuç doğruysa bunu 'ALL' yapıp tekrar çalıştırın (25 tekrar indirilmez)
+  const CHAPTERS = ['ALL'];   // İLK DENEME: sadece 25. Sonuç doğruysa bunu 'ALL' yapıp tekrar çalıştırın (25 tekrar indirilmez)
   const CONCURRENCY = 8;      // aynı anda kaç istek (6-12 arası uygundur; sunucu zorlanırsa kod kendisi yavaşlar)
   const TYPE_OVERRIDE = '';   // Boş bırakın: uçak tipi sayfadan otomatik okunur. Dosya adını elle belirlemek için örn. 'A320'
   const RESUME = true;        // true: yarım kalan tarama aynı revizyonsa kaldığı yerden devam eder

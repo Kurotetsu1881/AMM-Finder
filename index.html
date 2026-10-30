@@ -244,7 +244,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;
   <!-- Alt bilgi -->
   <div class="foot">
     <span id="foot1"></span>
-    <span>AMM Finder v1.8</span>
+    <span>AMM Finder v1.9</span>
   </div>
 </div>
 
@@ -604,7 +604,7 @@ function render(force) {
     const href = tpl.startsWith('https://') ? tpl.replace('{ID}', encodeURIComponent(t.id)) : '';
     const rv = (d.chInfo[t.ch] || {}).revNum;
     const ek = keyOf(t, rec);
-    const badge = !ek.v ? '' : !ok ? `<span class="tag bad">${ek.k} ${ek.v} için geçerli değil</span>`
+    const badge = (!t.msn && !t.fsn) ? `<span class="tag">tüm uçaklar</span>` : !ek.v ? '' : !ok ? `<span class="tag bad">${ek.k} ${ek.v} için geçerli değil</span>`
       : ek.r ? `<span class="tag ok">${ek.k} ${ek.v} ✓</span>` : `<span class="tag">tüm uçaklar</span>`;
     const engTag = t.eng ? `<span class="tag">${esc(t.eng)} motor</span>` : '';
     const eff = t.app ? esc(t.app.replace(/^[*\s]*/, '')) : (t.note ? esc(t.note) : '');
