@@ -17,7 +17,10 @@
   const BASE = `${location.origin}/${seg}/api/toc/${PREFIX}/getTocItems?id=`;
 
   const wc = new URL(location.href).searchParams.get('wc') || '';
-  const type = (TYPE_OVERRIDE || (/actype:([^;]+)/i.exec(wc) || /AMM - ([A-Z0-9]+) - /i.exec(document.title) || [])[1] || 'UNKNOWN').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  // Tip: adreste birden çok actype olabilir (A318;A319;A320;A321). A32x ailesi tek dosya olarak "A320" adıyla kaydedilir.
+  const acs = [...wc.matchAll(/actype:([A-Za-z0-9]+)/gi)].map(m => m[1].toUpperCase());
+  const autoType = acs.find(t => /^A3(18|19|20|21)$/.test(t)) ? 'A320' : (acs[0] || (/AMM - ([A-Z0-9]+)/i.exec(document.title) || [])[1] || 'UNKNOWN');
+  const type = (TYPE_OVERRIDE || autoType).toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (type === 'UNKNOWN') console.warn('Uçak tipi sayfadan okunamadı. Kodun başındaki TYPE_OVERRIDE satırına tipi yazın (örn. \'A350\').');
 
   // Revizyon numarası ve tarihi SAYFA BAŞLIĞINDAN okunur ("... Rev. num: 84 - 01-Oct-2026 ...")
@@ -36,7 +39,7 @@
     console.warn('Uyarı: açık sayfa bir görev (task) sayfası değil. "AMM\'de aç" linkleri çalışmayabilir. Önce sol ağaçtan bir görev açıp kodu tekrar çalıştırın.');
   }
   pageUrl.searchParams.set('itemId', '{ID}');
-  const linkTemplate = pageUrl.toString().replace('%7BID%7D', '{ID}');
+  const linkTemplate = location.href.replace(/([?&]itemId=)[^&#]*/, '$1{ID}');   // adres, portalın kendi yazımıyla aynen korunur
 
   const parseApp = a => {
     const raw = String(a || '').replace(/\s+/g, ' ').trim();

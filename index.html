@@ -244,7 +244,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;
   <!-- Alt bilgi -->
   <div class="foot">
     <span id="foot1"></span>
-    <span>AMM Finder v1.5</span>
+    <span>AMM Finder v1.6</span>
   </div>
 </div>
 
@@ -595,7 +595,7 @@ function render(force) {
     return;
   }
   $('emptyState').hidden = true; $('resultsWrap').hidden = false;
-  const tpl = d.meta.linkTemplate || '';
+  const tpl = (d.meta.linkTemplate || '').replace(/%3A/gi, ':').replace(/%3B/gi, ';');   // portalın kendi adres yazımı (wc=actype:A320;...)
   box.innerHTML = hits.slice(0, MAX_SHOW).map(({t, ok}) => {
     const ref = `${t.ref}${t.rev ? '-' + t.rev : ''}`;
     const href = tpl.startsWith('https://') ? tpl.replace('{ID}', encodeURIComponent(t.id)) : '';
