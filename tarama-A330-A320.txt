@@ -1,0 +1,222 @@
+// ===== AMM TARAMA KODU v2 (hızlı, paralel, kaldığı yerden devam eder) =====
+// Kullanım: Airbus AMM sayfasında SOL AĞAÇTAN BİR GÖREV (task) AÇIN, F12 > Console'a bu kodun tamamını yapıştırıp Enter'a basın.
+// Bittiğinde "amm_<TİP>.json" dosyası otomatik iner (örn. amm_A330.json). Onu AMM Finder klasörüne koyun, başka bir şey yapmayın.
+(async () => {
+  // ===== AYARLAR =====
+  const CHAPTERS = 'ALL';     // tüm chapter'lar. Sadece bazıları için: ['21','24','25']
+  const CONCURRENCY = 8;      // aynı anda kaç istek (6-12 arası uygundur; sunucu zorlanırsa kod kendisi yavaşlar)
+  const TYPE_OVERRIDE = '';   // Boş bırakın: uçak tipi sayfadan otomatik okunur. Dosya adını elle belirlemek için örn. 'A320'
+  const RESUME = true;        // true: yarım kalan tarama aynı revizyonsa kaldığı yerden devam eder
+  // ===================
+  const REF = /^(\d{2}-\d{2}-\d{2}-\d{3}-\d{3})(?:-([A-Z0-9]+))?\s*-\s*(.+)$/;
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  const seg = location.pathname.split('/')[1];
+  const PREFIX = (location.pathname.match(/\/document\/([^\/]+)\//) || [])[1];
+  if (!PREFIX) return console.error('AMM sayfasında değilsiniz (adreste /document/<kod>/ yok).');
+  const BASE = `${location.origin}/${seg}/api/toc/${PREFIX}/getTocItems?id=`;
+
+  const wc = new URL(location.href).searchParams.get('wc') || '';
+  // Tip: adreste birden çok actype olabilir (A318;A319;A320;A321). A32x ailesi tek dosya olarak "A320" adıyla kaydedilir.
+  const acs = [...wc.matchAll(/actype:([A-Za-z0-9]+)/gi)].map(m => m[1].toUpperCase());
+  const autoType = acs.find(t => /^A3(18|19|20|21)$/.test(t)) ? 'A320' : (acs[0] || (/AMM - ([A-Z0-9]+)/i.exec(document.title) || [])[1] || 'UNKNOWN');
+  const type = (TYPE_OVERRIDE || autoType).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (type === 'UNKNOWN') console.warn('Uçak tipi sayfadan okunamadı. Kodun başındaki TYPE_OVERRIDE satırına tipi yazın (örn. \'A350\').');
+
+  // Revizyon numarası ve tarihi SAYFA BAŞLIĞINDAN okunur ("... Rev. num: 84 - 01-Oct-2026 ...")
+  const rm = /Rev\.?\s*num:?\s*(\d+)\s*-\s*(\d{1,2}-[A-Za-z]{3}-\d{4})/i.exec(document.title);
+  let revNum = rm ? rm[1] : null, revDate = rm ? rm[2] : null;
+  if (!revNum) {                                           // başlıkta "Rev. num" yoksa: tarihi başlıktan al, numarayı sor
+    const dm = /(\d{1,2}-[A-Za-z]{3}-\d{4})/.exec(document.title);
+    revDate = revDate || (dm ? dm[1] : '');
+    const ans = (prompt('Revizyon numarası sayfa başlığında bulunamadı.\nKapaktaki "Revision number" değerini yazın. Bilmiyorsanız boş bırakın, tarih (' + (revDate || '?') + ') kullanılır:', '') || '').trim();
+    revNum = ans || revDate;
+    if (!revNum) return console.error('Revizyon bilgisi bulunamadı, tarama iptal edildi.');
+  }
+  console.log(`%c${type} AMM · REV:${revNum} · ${revDate} · önek: ${PREFIX}`, 'font-weight:bold');
+  console.log('Not: konsoldaki kırmızı "404" satırları normaldir (olmayan chapter\'lar, motor harfi denemeleri). Durdurmak için: window.__stop = true');
+
+  const pageUrl = new URL(location.href);
+  if (!/_EN\d{12,}$/.test(pageUrl.searchParams.get('itemId') || '')) {
+    console.warn('Uyarı: açık sayfa bir görev (task) sayfası değil. "AMM\'de aç" linkleri çalışmayabilir. Önce sol ağaçtan bir görev açıp kodu tekrar çalıştırın.');
+  }
+  pageUrl.searchParams.set('itemId', '{ID}');
+  const linkTemplate = location.href.replace(/([?&]itemId=)[^&#]*/, '$1{ID}');   // adres, portalın kendi yazımıyla aynen korunur
+
+  const parseApp = a => {
+    const raw = String(a || '').replace(/\s+/g, ' ').trim();
+    const body = raw.replace(/^[*\s]*ON A\/C\s*(?:FSN\s*)?/i, '').trim();
+    if (!body || /^ALL$/i.test(body)) return {app: raw, fsn: null, unk: false};
+    const ranges = []; let unk = false;
+    body.split(/[,;]/).forEach(tok => {
+      tok = tok.trim(); if (!tok) return;
+      let m;
+      if ((m = /^(\d+)\s*-\s*(\d+)$/.exec(tok))) ranges.push([+m[1], +m[2]]);
+      else if ((m = /^(\d+)$/.exec(tok))) ranges.push([+m[1], +m[1]]);
+      else unk = true;
+    });
+    return {app: raw, fsn: !unk && ranges.length ? ranges : null, unk: unk || !ranges.length};
+  };
+
+  // ---- devam etme için küçük IndexedDB deposu ----
+  const IDB = {
+    open: () => new Promise((res, rej) => { const r = indexedDB.open('ammscan', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }),
+    async get(k) { try { const d = await this.open(); return await new Promise(res => { const q = d.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => res(null); }); } catch (e) { return null; } },
+    async set(k, v) { try { const d = await this.open(); await new Promise(res => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = res; }); } catch (e) {} },
+    async del(k) { try { const d = await this.open(); await new Promise(res => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').delete(k); t.oncomplete = res; t.onerror = res; }); } catch (e) {} }
+  };
+  const KEY = `ammscan|${PREFIX}|${revNum}`;
+  const saved = RESUME ? ((await IDB.get(KEY)) || {}) : {};          // {chapter: [görevler]}
+  const resumed = Object.keys(saved);
+  if (resumed.length) console.log(`Önceki taramadan ${resumed.length} chapter hazır (${resumed.join(',')}), tekrar indirilmeyecek.`);
+
+  // Motor chapter'ları (70-80) üretici koduna göre ayrılır (GE/PW/RR): kök kimlik "<önek>_EN79K" gibidir, harfi kod kendisi bulur.
+  const base = CHAPTERS === 'ALL' ? Array.from({length: 95}, (_, i) => String(i + 5).padStart(2, '0')) : CHAPTERS;
+  const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+  const all = base.flatMap(c => (/^7\d$|^80$/.test(c) ? LETTERS.map(l => c + l) : [c]));
+  const done = new Map(Object.entries(saved));                        // ch -> görev dizisi
+  const todoList = all.filter(c => !done.has(c));
+  const skipCh = [], badCh = [];
+  let skipped = 0, nReq = 0, nErr = 0, limit = CONCURRENCY, okStreak = 0, pauseUntil = 0, lastSlow = 0;
+  const t0 = Date.now();
+  window.__stop = false;
+
+  const addSol = (s, into) => {
+    if (!s) return;
+    const m = REF.exec((s.title || '').trim());
+    if (m && s.id) {
+      if (!into.has(s.id) && m[3].trim().toUpperCase() !== 'DELETED') {
+        const a = parseApp(s.applicability);
+        into.set(s.id, {id: s.id, ch: m[1].slice(0, 2), ref: m[1], rev: m[2] || '',
+                        title: m[3].trim(), app: a.app, fsn: a.fsn, unk: a.unk});
+      }
+    } else if (s.title) skipped++;
+    (s.solutions || []).forEach(x => addSol(x, into));
+  };
+
+  // Tek istek: 404 -> {notFound}; 429/5xx/ağ hatası -> bekleyip yeniden dener ve hızı düşürür
+  const getJson = async id => {
+    for (let k = 0; k < 5; k++) {
+      if (window.__stop) return null;
+      const w = pauseUntil - Date.now(); if (w > 0) await sleep(w);
+      try {
+        nReq++;
+        const r = await fetch(BASE + encodeURIComponent(id), {credentials: 'include'});
+        if (r.status === 404) return {notFound: true};
+        if (r.status === 429 || r.status >= 500) {
+          nErr++; okStreak = 0;
+          if (Date.now() - lastSlow > 3000) { lastSlow = Date.now(); limit = Math.max(3, Math.min(limit, Math.ceil(limit * 0.75))); }   // sunucu zorlanıyor: yavaşla
+          const ra = +r.headers.get('retry-after') || 0;
+          pauseUntil = Math.max(pauseUntil, Date.now() + Math.max(ra * 1000, 800 * (k + 1)));
+          throw new Error(r.status);
+        }
+        if (!r.ok) throw new Error(r.status);
+        const j = await r.json();
+        if (++okStreak >= 150 && limit < CONCURRENCY) { limit++; okStreak = 0; }   // sorun yoksa tekrar hızlan
+        return j;
+      } catch (e) { nErr++; await sleep(400 * (k + 1)); }
+    }
+    return null;
+  };
+
+  // ---- chapter durumları ve ortak iş kuyruğu ----
+  const st = new Map();    // ch -> {mine, seen, pending, failed, isEmpty}
+  const queue = [];
+  todoList.forEach(ch => {
+    st.set(ch, {mine: new Map(), seen: new Set(), pending: 1, failed: [], empty: false, finished: false});
+    queue.push({ch, id: `${PREFIX}_EN${ch}`, root: true});
+  });
+  let active = 0;
+
+  const finishCheck = ch => {
+    const s = st.get(ch);
+    if (s.pending > 0 || s.finished) return;
+    s.finished = true;
+  };
+  const process = async job => {
+    const s = st.get(job.ch);
+    const j = await getJson(job.id);
+    if (!j || j.notFound) {
+      if (job.root) { s.empty = true; }
+      else s.failed.push(job.id);
+    } else {
+      if (job.root && !((j.childTocItems || []).length || (j.listSolutions || []).length)) s.empty = true;
+      if (job.root && /^\d\d[A-Z]$/.test(job.ch)) {                // motor chapter'ı: üreticiyi başlıktan oku
+        const m = /\(([A-Z]{2,4})\)/.exec((j.childTocItems || []).map(c => c.title || '').join(' ') + ' ' + (j.title || ''));
+        s.eng = m ? m[1] : '';
+        if (!s.empty) console.log(`Motor chapter bulundu: ${job.ch} → ${s.eng || '?'}`);
+      }
+      (j.childTocItems || []).forEach(c => {
+        if (c.id && !s.seen.has(c.id)) { s.seen.add(c.id); s.pending++; queue.push({ch: job.ch, id: c.id}); }
+      });
+      (j.listSolutions || []).forEach(x => addSol(x, s.mine));
+    }
+    s.pending--; finishCheck(job.ch);
+  };
+
+  let lastLog = 0;
+  const report = () => {
+    if (Date.now() - lastLog < 5000) return; lastLog = Date.now();
+    const fin = [...st.values()].filter(x => x.finished).length;
+    const rate = (nReq / ((Date.now() - t0) / 1000)).toFixed(1);
+    const tasks = [...st.values()].reduce((a, x) => a + x.mine.size, 0) + [...done.values()].reduce((a, x) => a + x.length, 0);
+    console.log(`İstek ${nReq} (${rate}/sn) · kuyruk ${queue.length} · eşzamanlı ${limit} · chapter ${fin}/${st.size} bitti · ${tasks} görev`);
+  };
+  const flushChapter = async ch => {                       // biten chapter'ı kalıcı olarak kaydet
+    const s = st.get(ch);
+    if (s.flushed || !s.finished) return; s.flushed = true;
+    if (s.empty) { skipCh.push(ch); return; }
+    if (s.failed.length) return;                           // eksik: ikinci turda denenecek
+    done.set(ch, [...s.mine.values()].map(t => s.eng ? {...t, eng: s.eng} : t));
+    await IDB.set(KEY, Object.fromEntries(done));
+    console.log(`✔ Chapter ${ch} tamam: ${s.mine.size} görev`);
+  };
+
+  const pool = async idx => {
+    while (!window.__stop) {
+      if (idx >= limit) { if (!queue.length && !active) return; await sleep(200); if (!queue.length && !active) return; continue; }
+      const job = queue.shift();
+      if (!job) { if (!active) return; await sleep(50); continue; }
+      active++;
+      try { await process(job); } finally { active--; }
+      report(); await flushChapter(job.ch);
+    }
+  };
+  await Promise.all(Array.from({length: CONCURRENCY}, (_, i) => pool(i)));
+
+  // ---- ikinci tur: başarısız düğümleri yavaşça tekrar dene ----
+  if (!window.__stop) {
+    const retry = [...st.entries()].filter(([, s]) => !s.empty && s.failed.length);
+    if (retry.length) {
+      console.warn(`${retry.length} chapter'da alınamayan düğümler var, 3 sn sonra tekrar deneniyor...`);
+      await sleep(3000); limit = 3; pauseUntil = 0;
+      retry.forEach(([ch, s]) => { s.flushed = false; s.finished = false; s.seen = s.seen; s.pending = s.failed.length;
+        s.failed.splice(0).forEach(id => queue.push({ch, id})); });
+      await Promise.all(Array.from({length: 3}, (_, i) => pool(i)));
+    }
+  }
+  for (const [ch, s] of st) {
+    if (!s.finished) { badCh.push(ch); continue; }
+    await flushChapter(ch);
+    if (!s.empty && s.failed.length) { badCh.push(ch); console.warn(`Chapter ${ch} EKSİK kaldı (${s.failed.length} düğüm alınamadı), dosyaya girmeyecek.`); }
+  }
+
+  if (!done.size) return console.error('Tamamlanan chapter yok, dosya oluşmadı.');
+  const okCh = [...done.keys()].sort();
+  const rows = okCh.flatMap(c => done.get(c)).sort((a, b) => a.ref.localeCompare(b.ref) || a.rev.localeCompare(b.rev));
+  const out = {meta: {type, revNum, revDate, prefix: PREFIX, linkTemplate, pageTitle: document.title,
+                      exported: new Date().toISOString(), chapters: [...new Set(okCh.map(k => k.slice(0, 2)))], count: rows.length}, tasks: rows};
+  const complete = !badCh.length && CHAPTERS === 'ALL';
+  const fname = complete ? `amm_${type}.json` : `amm_${type}_PARCA.json`;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(out)], {type: 'application/json'}));
+  a.download = fname; a.click();
+  window.__tasks = rows;
+  const mins = ((Date.now() - t0) / 60000).toFixed(1);
+  console.log(`%cBİTTİ: ${rows.length} görev, ${nReq} istek, ${mins} dk, ${skipped} atlanan kayıt. Chapter: ${okCh.join(',')}`, 'font-weight:bold;color:green');
+  if (complete) { await IDB.del(KEY); console.log(`İnen dosya: ${fname} → AMM Finder klasörüne koyun (GitHub'a yükleyin).`); }
+  else {
+    console.warn(`Dosya tam değil (${fname}). Eksik/yarım chapter'lar: ${JSON.stringify(badCh)}. Kodu AYNI SAYFADA tekrar çalıştırın: biten chapter'lar tekrar indirilmez, sadece eksikler denenir ve tam dosya (amm_${type}.json) iner.`);
+  }
+})();
