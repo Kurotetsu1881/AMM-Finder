@@ -1,0 +1,237 @@
+// ===== BOEING (Toolbox) AMM TARAMA KODU — hızlı, paralel, kaldığı yerden devam eder =====
+// Kullanım: toolbox.boeing.com'da AMM'i açın (örn. D633A101-THY-AMM), sol ağaçtan BİR GÖREV (Task) açın,
+// F12 > Console'a bu kodun tamamını yapıştırıp Enter'a basın.
+// Bittiğinde "amm_<TİP>.json" dosyası otomatik iner (amm_B737NG.json, amm_B737MAX.json, amm_B777.json). Onu AMM Finder klasörüne koyun.
+// Kod yalnızca SİZİN oturumunuzda, SİZİN yetkinizle ve sadece okuma isteği (içindekiler ağacı) yapar.
+(async () => {
+  // ===== AYARLAR =====
+  const CHAPTERS = 'ALL';     // tüm chapter'lar. Deneme için ['25'] yazılabilir (dosya _PARCA olarak iner)
+  const CONCURRENCY = 8;      // aynı anda kaç istek (6-10 uygundur; sunucu zorlanırsa kod kendisi yavaşlar)
+  const TYPE_OVERRIDE = '';   // Boş: tip doküman numarasından okunur (D633A101→B737NG, D633AM101→B737MAX, D633W101→B777). Elle: örn. 'B787'
+  const RESUME = true;        // true: yarım kalan tarama aynı doküman/yayında kaldığı yerden devam eder
+  // ===================
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const O = location.origin;
+  const href = decodeURIComponent(location.href);
+  const nbr = (/productNumber=([^;&\/]+)/.exec(href) || [])[1];
+  const issue = (/issueDate=([^;&\/]+)/.exec(href) || [])[1];
+  if (!nbr || !issue) return console.error('Toolbox doküman sayfasında değilsiniz (adreste productNumber/issueDate yok). AMM\'i açıp tekrar deneyin.');
+
+  const xsrf = () => { const m = document.cookie.match(/(?:^|; )XSRF-TOKEN=([^;]+)/); return m ? decodeURIComponent(m[1]) : ''; };
+  const hdr = () => { const h = {'Content-Type': 'application/json', Accept: 'application/json'}; const x = xsrf(); if (x) h['X-XSRF-TOKEN'] = x; return h; };
+
+  // ---- doküman kimliği (productInstanceId) ve yayın bilgisi ----
+  let rv = null;
+  try {
+    const r = await fetch(`${O}/product/productRevision/getPIRevisionByProductNbrAndIssueDateAndProductFormatLabelAndPIRevisionState?productNbr=${encodeURIComponent(nbr)}&issueDate=${encodeURIComponent(issue)}&productFormatLabel=XML&piRevisionState=PUBLISHED`, {credentials: 'include', headers: {Accept: 'application/json'}});
+    if (r.ok) rv = await r.json();
+  } catch (e) {}
+  const perf = performance.getEntriesByType('resource').map(x => x.name);
+  const treeUrl = perf.find(n => /getTocTreeFromDuIdPiId/.test(n));
+  const PI = (rv && rv.productInstanceId) || ((treeUrl || '').match(/productInstanceId=([\w-]+)/) || [])[1];
+  if (!PI) return console.error('Doküman kimliği (productInstanceId) bulunamadı. Sayfayı F5 ile yenileyip sol ağaç yüklenince tekrar deneyin.');
+
+  const TYPES = {D633A101: 'B737NG', D633AM101: 'B737MAX', D633W101: 'B777'};          // doküman numarası → tip (başka Boeing dokümanı için buraya satır eklenebilir)
+  const typeAuto = TYPES[(nbr.split('-')[0] || '').toUpperCase()] || nbr.split('-')[0].toUpperCase();
+  const type = (TYPE_OVERRIDE || typeAuto).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const iss = String((rv && (rv.issued || rv.issueDate)) || issue);
+  const dt = new Date(iss);
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const revDate = isNaN(dt) ? iss.slice(0, 10) : `${String(dt.getUTCDate()).padStart(2, '0')}-${MON[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`;
+  // Boeing'de kapaktaki "Revision number" ayrı yazar; portal bunu API'de vermiyor. Sorulur, boş bırakılırsa yayın tarihi kullanılır.
+  const ans = (prompt(`${nbr} · yayın tarihi ${revDate}\nKapaktaki "Revision number" değerini yazın (örn. 83). Bilmiyorsanız boş bırakın, tarih kullanılır:`, '') || '').trim();
+  const revNum = ans || revDate;
+  console.log(`%c${type} AMM · ${nbr} · REV:${revNum} · yayın ${revDate} · PI ${PI}`, 'font-weight:bold');
+  console.log('Durdurmak için: window.__stop = true');
+
+  // ---- devam etme için küçük IndexedDB deposu ----
+  const IDB = {
+    open: () => new Promise((res, rej) => { const r = indexedDB.open('ammscan', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }),
+    async get(k) { try { const d = await this.open(); return await new Promise(res => { const q = d.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => res(null); }); } catch (e) { return null; } },
+    async set(k, v) { try { const d = await this.open(); await new Promise(res => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = res; }); } catch (e) {} },
+    async del(k) { try { const d = await this.open(); await new Promise(res => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').delete(k); t.oncomplete = res; t.onerror = res; }); } catch (e) {} }
+  };
+  const KEY = `ammscanBOE1|${PI}`;
+  const saved0 = RESUME ? ((await IDB.get(KEY)) || {}) : {};
+  const saved = Object.fromEntries(Object.entries(saved0).filter(([, v]) => v && v.length));
+  if (Object.keys(saved).length) console.log(`Önceki taramadan ${Object.keys(saved).length} chapter hazır (${Object.keys(saved).join(',')}), tekrar indirilmeyecek.`);
+
+  const stat = {};
+  let nReq = 0, nErr = 0, limit = CONCURRENCY, okStreak = 0, pauseUntil = 0, lastSlow = 0, maxKids = 0;
+  const t0 = Date.now();
+  window.__stop = false;
+  const U = `${O}/product/tocService/getTocNodesForDisplay`;
+  const mk = p => ({orderBy: [{fieldName: 'TOC_TREE_INDEX', isAscending: true}], terms: '',
+    filterSetList: [
+      {filterFieldName: 'TOC_IS_ROOT_NODE', filterList: [{fieldName: 'TOC_IS_ROOT_NODE', filterValue: 0}]},
+      {filterFieldName: 'TOC_PRODUCT_INSTANCE_ID', filterList: [{fieldName: 'TOC_PRODUCT_INSTANCE_ID', filterValue: PI}]},
+      {filterFieldName: 'TOC_PARENT_TREE_INDEX', filterList: [{fieldName: 'TOC_PARENT_TREE_INDEX', filterValue: p}]}]});
+
+  // Bir düğümün çocuklarını getirir. Başarılı: dizi. Başarısız: null.
+  const kids = async p => {
+    for (let k = 0; k < 5; k++) {
+      if (window.__stop) return null;
+      const w = pauseUntil - Date.now(); if (w > 0) await sleep(w);
+      try {
+        nReq++;
+        const r = await fetch(U, {method: 'POST', credentials: 'include', headers: hdr(), body: JSON.stringify(mk(p))});
+        stat[r.status] = (stat[r.status] || 0) + 1;
+        if (r.status === 429 || r.status >= 500) {
+          nErr++; okStreak = 0;
+          if (Date.now() - lastSlow > 3000) { lastSlow = Date.now(); limit = Math.max(3, Math.min(limit, Math.ceil(limit * 0.75))); }
+          const ra = +r.headers.get('retry-after') || 0;
+          pauseUntil = Math.max(pauseUntil, Date.now() + Math.max(ra * 1000, 800 * (k + 1)));
+          throw new Error(r.status);
+        }
+        if (!r.ok) throw new Error(r.status);          // 403 (token yenilenmesi) dahil: çerez yeniden okunarak tekrar denenir
+        const j = await r.json();
+        const a = Array.isArray(j) ? j : (Object.values(j || {}).find(Array.isArray) || []);
+        if (a.length > maxKids) maxKids = a.length;
+        if (++okStreak >= 150 && limit < CONCURRENCY) { limit++; okStreak = 0; }
+        return a;
+      } catch (e) { nErr++; await sleep(400 * (k + 1)); }
+    }
+    return null;
+  };
+
+  // ---- kök düğümler (chapter'lar) ----
+  let top = await kids('U');
+  if (!top || !top.length) {                           // yedek: sayfanın kendi ağaç isteği
+    if (treeUrl) { try { top = await (await fetch(treeUrl, {credentials: 'include'})).json(); } catch (e) {} }
+  }
+  if (!Array.isArray(top) || !top.length) return console.error('Kök düğümler alınamadı. HTTP durumları:', JSON.stringify(stat));
+  const fleet = new Set();
+  top.forEach(n => ((n.applicItemInfo || {}).applicableAirplaneIds || []).forEach(i => fleet.add(String(i))));
+  let chNodes = top.filter(n => n.moduleType === 'chapter' && n.locationKey);
+  if (CHAPTERS !== 'ALL') chNodes = chNodes.filter(n => CHAPTERS.includes(String(n.locationKey)));
+  console.log(`Kök düğüm: ${top.length} · chapter: ${chNodes.length} · filodaki uçak kimliği: ${fleet.size}`);
+
+  const isTask = c => c && !c.hasChildren && (c.moduleType === 'task' || /^\d\d-\d\d-\d\d-\d{3}-\d{3}/.test(String(c.displayLabel || c.locationKey || '')));
+  let sample = 0, nRestr = 0;
+  const addTask = (c, mine, ch) => {
+    const ref = String(c.displayLabel || c.locationKey || '').trim();
+    if (!ref || !c.dataUnitId) return;
+    const ai = c.applicItemInfo || {};
+    const ids = (ai.applicableAirplaneIds || []).map(String);
+    const txt = (ai.displayText || []).join('; ');
+    const all = !ids.length || (fleet.size > 0 && ids.length >= fleet.size);
+    let title = String(c.title || c.fullTitle || '').trim();
+    if (title.toUpperCase().startsWith(ref.toUpperCase())) title = title.slice(ref.length).trim();
+    const row = {id: c.dataUnitId, ch, ref, rev: '', title: title || ref, app: txt, pf: 'AMM'};
+    if (!all) { row.air = ids; nRestr++; }
+    if (sample < 3) { sample++; console.log('Örnek görev:', JSON.stringify({ref, title: row.title, app: txt, uçak: ids.length, hepsi: all})); }
+    mine.set(c.dataUnitId + '|' + c.treeIndex, row);
+  };
+
+  // ---- chapter durumları ve ortak iş kuyruğu ----
+  const done = new Map(Object.entries(saved));
+  const st = new Map(), queue = [];
+  chNodes.forEach(n => {
+    const ch = String(n.locationKey);
+    if (done.has(ch)) return;
+    st.set(ch, {mine: new Map(), pending: 1, failed: [], empty: false, finished: false, flushed: false});
+    queue.push({ch, tx: n.treeIndex, root: true});
+  });
+  let active = 0;
+  const process = async job => {
+    const s = st.get(job.ch);
+    const a = await kids(job.tx);
+    if (!a) s.failed.push(job.tx);
+    else {
+      if (job.root && !a.length) s.empty = true;
+      a.forEach(c => {
+        if (!c) return;
+        if (isTask(c)) addTask(c, s.mine, job.ch);
+        else if (c.hasChildren && c.treeIndex) { s.pending++; queue.push({ch: job.ch, tx: c.treeIndex}); }
+      });
+    }
+    s.pending--;
+    if (s.pending <= 0) s.finished = true;
+  };
+
+  let lastLog = 0;
+  const report = () => {
+    if (Date.now() - lastLog < 5000) return; lastLog = Date.now();
+    const fin = [...st.values()].filter(x => x.finished).length;
+    const rate = (nReq / ((Date.now() - t0) / 1000)).toFixed(1);
+    const tasks = [...st.values()].reduce((a, x) => a + x.mine.size, 0) + [...done.values()].reduce((a, x) => a + x.length, 0);
+    console.log(`İstek ${nReq} (${rate}/sn) · kuyruk ${queue.length} · eşzamanlı ${limit} · chapter ${fin}/${st.size} bitti · ${tasks} görev`);
+  };
+  const flushChapter = async ch => {
+    const s = st.get(ch);
+    if (s.flushed || !s.finished) return; s.flushed = true;
+    if (s.empty) return;
+    if (s.failed.length) return;                       // eksik: ikinci turda denenecek
+    if (!s.mine.size) { console.warn(`Chapter ${ch}: düğümler bulundu ama 0 görev çıktı, kaydedilmedi.`); return; }
+    done.set(ch, [...s.mine.values()]);
+    await IDB.set(KEY, Object.fromEntries(done));
+    console.log(`✔ Chapter ${ch} tamam: ${s.mine.size} görev`);
+  };
+  const pool = async idx => {
+    while (!window.__stop) {
+      if (idx >= limit) { if (!queue.length && !active) return; await sleep(200); if (!queue.length && !active) return; continue; }
+      const job = queue.shift();
+      if (!job) { if (!active) return; await sleep(50); continue; }
+      active++;
+      try { await process(job); } finally { active--; }
+      report(); await flushChapter(job.ch);
+    }
+  };
+  await Promise.all(Array.from({length: CONCURRENCY}, (_, i) => pool(i)));
+
+  // ---- tekrar turları: başarısız düğümleri yavaşça (en çok 3 tur) tekrar dene ----
+  for (let round = 1; round <= 3 && !window.__stop; round++) {
+    const retry = [...st.entries()].filter(([, s]) => !s.empty && s.failed.length);
+    if (!retry.length) break;
+    console.warn(`Tur ${round}: ${retry.length} chapter'da alınamayan düğümler var (HTTP: ${JSON.stringify(stat)}), ${3 * round} sn sonra tekrar deneniyor...`);
+    await sleep(3000 * round); limit = 3; pauseUntil = 0;
+    retry.forEach(([ch, s]) => { s.flushed = false; s.finished = false; s.pending = s.failed.length;
+      s.failed.splice(0).forEach(tx => queue.push({ch, tx})); });
+    await Promise.all(Array.from({length: 3}, (_, i) => pool(i)));
+  }
+  const badCh = [];
+  for (const [ch, s] of st) {
+    if (!s.finished) { badCh.push(ch); continue; }
+    await flushChapter(ch);
+    if (!s.empty && s.failed.length) { badCh.push(ch); console.warn(`Chapter ${ch} EKSİK kaldı (${s.failed.length} düğüm alınamadı), dosyaya girmeyecek.`); }
+  }
+  {
+    const lines = [...st.entries()].map(([ch, s]) => done.has(ch) ? null :
+      `${ch}: ${s.empty ? 'boş' : !s.finished ? 'BİTMEDİ' : s.failed.length ? `EKSİK (${s.failed.length} düğüm alınamadı)` : !s.mine.size ? '0 görev' : 'kaydedilmedi'}`).filter(Boolean);
+    console.log('Alınan HTTP durumları:', JSON.stringify(stat), '· tek istekte en çok çocuk:', maxKids);
+    console.log('Dosyada OLMAYAN chapter\'lar ve nedenleri:\n' + (lines.join('\n') || '(yok)'));
+    if ([100, 200, 250, 500, 1000].includes(maxKids)) console.warn(`Uyarı: tek istekte ${maxKids} çocuk geldi; sunucu sayfalıyor olabilir. Bunu bana bildirin.`);
+  }
+  if (!done.size) return console.error('Tamamlanan chapter yok, dosya oluşmadı.');
+  const okCh = [...done.keys()].sort();
+  const rows = okCh.flatMap(c => done.get(c)).sort((a, b) => a.ref.localeCompare(b.ref));
+
+  // ---- "AMM'de aç" bağlantı şablonu: açık görevin adresindeki kimlik/görev numarası yer tutucuyla değiştirilir ----
+  let nId = 0, nRef = 0;
+  const idSet = new Set(rows.map(r => String(r.id).toLowerCase())), refSet = new Set(rows.map(r => r.ref));
+  let tpl = location.href.replace(/[0-9a-f]{8}(?:-|%2D)[0-9a-f]{4}(?:-|%2D)[0-9a-f]{4}(?:-|%2D)[0-9a-f]{4}(?:-|%2D)[0-9a-f]{12}/gi, m => {
+    if (idSet.has(m.replace(/%2D/gi, '-').toLowerCase())) { nId++; return '{ID}'; } return m; });
+  tpl = tpl.replace(/\d\d-\d\d-\d\d-\d{3}-\d{3}/g, m => { if (refSet.has(m)) { nRef++; return '{REF}'; } return m; });
+  console.log(`Bağlantı şablonu: ${nId} kimlik, ${nRef} görev numarası yer tutucuya çevrildi.`);
+  if (!nId && !nRef) {
+    console.warn('Açık sayfada görev yok, bağlantı şablonu oluşturulamadı. Taramadan sonra sol ağaçtan bir görev açıp adresi bana gönderin; ya da kodu bir görev açıkken çalıştırın.');
+  }
+
+  const out = {meta: {type, doc: nbr, revNum, revDate, issueDate: issue, productInstanceId: PI, internalRevision: rv && rv.internalRevision,
+                      linkTemplate: tpl, pageUrl: location.href, pageTitle: document.title, exported: new Date().toISOString(),
+                      chapters: okCh, count: rows.length, fleetSize: fleet.size, fleetIds: [...fleet]}, tasks: rows};
+  const complete = !badCh.length && CHAPTERS === 'ALL';
+  const fname = complete ? `amm_${type}.json` : `amm_${type}_PARCA.json`;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(out)], {type: 'application/json'}));
+  a.download = fname; a.click();
+  window.__tasks = rows;
+  const mins = ((Date.now() - t0) / 60000).toFixed(1);
+  console.log(`%cBİTTİ: ${rows.length} görev (${nRestr} tanesi belirli uçaklara özel), ${nReq} istek, ${mins} dk. Chapter: ${okCh.join(',')}`, 'font-weight:bold;color:green');
+  if (complete) { await IDB.del(KEY); console.log(`İnen dosya: ${fname} → AMM Finder klasörüne koyun (GitHub'a yükleyin).`); }
+  else {
+    if (CHAPTERS !== 'ALL') console.warn("Not: CHAPTERS değeri 'ALL' değil, bu yüzden dosya PARCA olarak indi.");
+    console.warn(`Dosya tam değil (${fname}). Eksik/yarım chapter'lar: ${JSON.stringify(badCh)}. Kodu AYNI SAYFADA tekrar çalıştırın: biten chapter'lar tekrar indirilmez, sadece eksikler denenir.`);
+  }
+})();

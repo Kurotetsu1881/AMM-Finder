@@ -244,7 +244,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;
   <!-- Alt bilgi -->
   <div class="foot">
     <span id="foot1"></span>
-    <span>AMM Finder v1.9</span>
+    <span>AMM Finder v1.10</span>
   </div>
 </div>
 
@@ -356,6 +356,11 @@ function loadTypeMap() {
   txt.split(/\r?\n/).forEach(l => { const [k, v] = l.split('=').map(x => (x || '').trim().toUpperCase()); if (k && v) state.typeMap[k] = v; });
 }
 function typeOf(model) {
+  const full = String(model || '').toUpperCase().trim().replace(/^B(?=7\d\d)/, '');
+  if (state.typeMap[full]) return state.typeMap[full];
+  if (/^737-/.test(full)) return /^737-(8|9|10|8200)$/.test(full) ? 'B737MAX' : 'B737NG';   // 737-8 / 737-9 = MAX; müşteri kodlu 737-86N, 737-9F2ER... = NG
+  if (/^777-/.test(full)) return 'B777';
+  if (/^787-/.test(full)) return 'B787';
   const m = String(model || '').toUpperCase().trim().replace(/^A(?=\d)/, '').split(/[-\s\/]/)[0];
   return state.typeMap[m] || (/^\d/.test(m) ? 'A' + m : m);
 }
@@ -363,13 +368,14 @@ function parseFleetTable(text) {
   const lines = String(text).replace(/^﻿/, '').split(/\r?\n/).filter(l => l.trim());
   const clean = x => x.trim().replace(/^"(.*)"$/, '$1').trim();
   const split = l => (l.includes('\t') ? l.split('\t') : l.split(/[;,]/)).map(clean);
-  const idx = {reg: 0, model: 1, fsn: 2, msn: 3, engine: 4, amm: -1};
+  const idx = {reg: 0, model: 1, fsn: 2, msn: 3, engine: 4, amm: -1, bid: -1};
   const out = [];
   lines.forEach((l, i) => {
     const c = split(l);
     if (i === 0 && /reg|kuyruk|tail/i.test(c.join('|'))) {
       c.forEach((h, j) => {
         if (/reg|kuyruk|tail/i.test(h)) idx.reg = j;
+        else if (/boeing|airplane|^bid$/i.test(h)) idx.bid = j;
         else if (/amm/i.test(h)) idx.amm = j;
         else if (/engine|motor/i.test(h)) idx.engine = j;
         else if (/model|tip|type/i.test(h)) idx.model = j;
@@ -381,7 +387,7 @@ function parseFleetTable(text) {
     const reg = (c[idx.reg] || '').toUpperCase();
     if (reg.length < 3) return;
     out.push({reg, model: c[idx.model] || '', fsn: parseInt(c[idx.fsn], 10) || null, msn: c[idx.msn] || '',
-              engine: c[idx.engine] || '', amm: idx.amm >= 0 ? (c[idx.amm] || '') : ''});
+              engine: c[idx.engine] || '', amm: idx.amm >= 0 ? (c[idx.amm] || '') : '', bid: idx.bid >= 0 ? (c[idx.bid] || '') : ''});
   });
   return out;
 }
@@ -559,10 +565,11 @@ const engFam = e => { e = String(e || '').toUpperCase();
   if (/PW|PRATT|JT9/.test(e)) return 'PW';
   if (/TRENT|RB211|ROLLS|\bRR\b/.test(e)) return 'RR';
   return ''; };
-const effLabel = rec => (state.cur && state.cur.d && state.cur.d.tasks.some(x => x.msn)) ? `MSN ${parseInt(rec.msn, 10) || ''}` : `FSN ${rec.fsn || ''}`;
+const effLabel = rec => (state.cur && state.cur.d && state.cur.d.tasks.some(x => x.air)) ? rec.reg : (state.cur && state.cur.d && state.cur.d.tasks.some(x => x.msn)) ? `MSN ${parseInt(rec.msn, 10) || ''}` : `FSN ${rec.fsn || ''}`;
 // Geçerlilik: Airbus A320/A330/A340 görevleri FSN'e, A350 görevleri MSN'e göre yazılır.
-const keyOf = (t, rec) => t.msn ? {k: 'MSN', v: parseInt(rec.msn, 10) || null, r: t.msn} : {k: 'FSN', v: rec.fsn, r: t.fsn};
-const effOk = (t, rec) => { const e = keyOf(t, rec); return !e.v || !e.r || e.r.some(([a, b]) => e.v >= a && e.v <= b); };
+const keyOf = (t, rec) => t.air ? {k: 'UÇAK', v: rec.bid || null, r: t.air} : t.msn ? {k: 'MSN', v: parseInt(rec.msn, 10) || null, r: t.msn} : {k: 'FSN', v: rec.fsn, r: t.fsn};
+const effOk = (t, rec) => { if (t.air) return !rec.bid || t.air.includes(String(rec.bid));
+   const e = keyOf(t, rec); return !e.v || !e.r || e.r.some(([a, b]) => e.v >= a && e.v <= b); };
 
 function render(force) {
   const box = $('results'), ch = $('chapter').value;
@@ -601,10 +608,10 @@ function render(force) {
   const tpl = (d.meta.linkTemplate || '').replace(/%3A/gi, ':').replace(/%3B/gi, ';');   // portalın kendi adres yazımı (wc=actype:A320;...)
   box.innerHTML = hits.slice(0, MAX_SHOW).map(({t, ok}) => {
     const ref = `${t.ref}${t.rev ? '-' + t.rev : ''}`;
-    const href = tpl.startsWith('https://') ? tpl.replace('{ID}', encodeURIComponent(t.id)) : '';
+    const href = tpl.startsWith('https://') ? tpl.replace('{ID}', encodeURIComponent(t.id)).replace('{REF}', encodeURIComponent(t.ref)) : '';
     const rv = (d.chInfo[t.ch] || {}).revNum;
     const ek = keyOf(t, rec);
-    const badge = (!t.msn && !t.fsn) ? `<span class="tag">tüm uçaklar</span>` : !ek.v ? '' : !ok ? `<span class="tag bad">${ek.k} ${ek.v} için geçerli değil</span>`
+    const badge = t.air ? (!ek.v ? `<span class="tag">belirli uçaklara özel</span>` : !ok ? `<span class="tag bad">bu uçak için geçerli değil</span>` : `<span class="tag ok">bu uçak için geçerli ✓</span>`) : (!t.msn && !t.fsn) ? `<span class="tag">tüm uçaklar</span>` : !ek.v ? '' : !ok ? `<span class="tag bad">${ek.k} ${ek.v} için geçerli değil</span>`
       : ek.r ? `<span class="tag ok">${ek.k} ${ek.v} ✓</span>` : `<span class="tag">tüm uçaklar</span>`;
     const engTag = t.eng ? `<span class="tag">${esc(t.eng)} motor</span>` : '';
     const eff = t.app ? esc(t.app.replace(/^[*\s]*/, '')) : (t.note ? esc(t.note) : '');

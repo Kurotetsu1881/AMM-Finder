@@ -1,4 +1,4 @@
-AMM FINDER v1.8 - KULLANIM
+AMM FINDER v1.10 - KULLANIM
 
 KLASÖRDE (GitHub'daki AMM Finder klasörü) OLMASI GEREKENLER
   Sayfa dosyaları : index.html, sw.js, manifest.webmanifest, background.jpg,
@@ -21,3 +21,10 @@ A350: tarama-A350.txt (A350 portalı S1000D yapıda olduğu için ayrı kod). A3
 sayfa filodaki MSN sütununu kullanır. İlk çalıştırmada kod sadece chapter 25'i indirir (deneme); doğruysa kodun başındaki
 CHAPTERS satırını 'ALL' yapıp tekrar çalıştırın. Çıkan dosya amm_A350.json olarak klasöre konur.
 A320/A330/A340 için tarama-kodu.txt kullanılır.
+
+
+=== BOEING (v1.11) ===
+1) tarama-Boeing.txt: Boeing Toolbox'ta AMM'i açın, sol ağaçtan bir görev açın, F12>Console'a yapıştırın.
+   Çıktı: amm_B737NG.json (D633A101), amm_B737MAX.json (D633AM101), amm_B777.json (D633W101). Dosyaları AMM Finder klasörüne koyun.
+2) filo.csv'de Boeing uçaklar için model sütunu yeterli (737-8/737-9 = MAX, diğer 737-xxx = NG, 777-xxx = B777).
+3) Uçağa özel (belirli uçaklara geçerli) görevlerin süzülmesi için filo.csv'ye "Boeing ID" sütunu eklenecek (kuyruk kodu -> Boeing uçak kimliği). O zamana kadar bu görevlerde "belirli uçaklara özel" etiketi görünür, hiçbiri gizlenmez.
