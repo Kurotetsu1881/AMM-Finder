@@ -289,6 +289,10 @@ function revInfo(d) {
 // ---------- AMM veri birleştirme ----------
 function mergeDataset(cur, j) {
   cur = cur || {meta: {}, chInfo: {}, tasks: []};
+  // Boeing motor chapter'ları "H70", "H71"… gibi harf önekli gelir: harf atılır, 70-80 olarak gösterilir (başlık ATA listesinden)
+  const nc = c => String(c).replace(/^\D+/, '');
+  j.tasks.forEach(t => { t.ch = nc(t.ch); });
+  if (j.meta.chapters) j.meta.chapters = [...new Set(j.meta.chapters.map(nc))];
   const chs = (j.meta.chapters && j.meta.chapters.length) ? j.meta.chapters : [...new Set(j.tasks.map(x => x.ch))];
   const tasks = cur.tasks.filter(x => !chs.includes(x.ch)).concat(j.tasks);
   const chInfo = {...cur.chInfo};

@@ -118,7 +118,7 @@
     const all = !ids.length || (fleet.size > 0 && ids.length >= fleet.size);
     let title = String(c.title || c.fullTitle || '').trim();
     if (title.toUpperCase().startsWith(ref.toUpperCase())) title = title.slice(ref.length).trim();
-    const row = {id: c.dataUnitId, ch, ref, rev: '', title: title || ref, app: txt, pf: 'AMM'};
+    const row = {id: c.dataUnitId, ch: String(ch).replace(/^\D+/, ''), ref, rev: '', title: title || ref, app: txt, pf: 'AMM'};
     if (!all) { row.air = ids; nRestr++; }
     if (sample < 3) { sample++; console.log('Örnek görev:', JSON.stringify({ref, title: row.title, app: txt, uçak: ids.length, hepsi: all})); }
     mine.set(c.dataUnitId + '|' + c.treeIndex, row);
@@ -212,7 +212,7 @@
 
   const out = {meta: {type, doc: nbr, revNum, revDate, issueDate: issue, productInstanceId: PI, internalRevision: rv && rv.internalRevision,
                       linkTemplate: tpl, pageUrl: location.href, pageTitle: document.title, exported: new Date().toISOString(),
-                      chapters: okCh, count: rows.length, fleetSize: fleet.size, fleetIds: [...fleet]}, tasks: rows};
+                      chapters: [...new Set(okCh.map(c => String(c).replace(/^\D+/, '')))], count: rows.length, fleetSize: fleet.size, fleetIds: [...fleet]}, tasks: rows};
   const complete = !badCh.length && CHAPTERS === 'ALL';
   const fname = complete ? `amm_${type}.json` : `amm_${type}_PARCA.json`;
   const a = document.createElement('a');
