@@ -244,7 +244,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;
   <!-- Alt bilgi -->
   <div class="foot">
     <span id="foot1"></span>
-    <span>AMM Finder v1.10</span>
+    <span>AMM Finder v1.16</span>
   </div>
 </div>
 
@@ -573,14 +573,15 @@ const engFam = e => { e = String(e || '').toUpperCase();
 const effLabel = rec => (state.cur && state.cur.d && state.cur.d.tasks.some(x => x.air)) ? (rec.fsn ? `FSN ${rec.fsn}` : rec.reg) : (state.cur && state.cur.d && state.cur.d.tasks.some(x => x.msn)) ? `MSN ${parseInt(rec.msn, 10) || ''}` : `FSN ${rec.fsn || ''}`;
 // Geçerlilik: Airbus A320/A330/A340 görevleri FSN'e, A350 görevleri MSN'e göre yazılır.
 // Boeing: geçerlilik metni "THY 001-004, 006, 008-017, 201-999" biçimindedir; THY filo numarası (FSN) aralıklarıdır.
-const bRanges = t => {
-  if (t._br !== undefined) return t._br;
-  let r = null; const m = /^\s*[A-Z]{2,4}\s+([\d,\s\-–]+)$/.exec(String(t.app || ''));
-  if (m) { r = []; m[1].split(',').forEach(tok => { tok = tok.trim(); let x;
+const bInfo = t => {
+  if (t._bi !== undefined) return t._bi;
+  const txt = String(t.app || ''), r = [], re = /\bTHY\s+((?:\d+(?:\s*[-–]\s*\d+)?\s*,\s*)*\d+(?:\s*[-–]\s*\d+)?)/g; let m;
+  while ((m = re.exec(txt))) m[1].split(',').forEach(tok => { tok = tok.trim(); let x;
     if ((x = /^(\d+)\s*[-–]\s*(\d+)$/.exec(tok))) r.push([+x[1], +x[2]]); else if ((x = /^(\d+)$/.exec(tok))) r.push([+x[1], +x[1]]); });
-    if (!r.length) r = null; }
-  return t._br = r;
+  // "PRE SB …", "AIRPLANES WITH …" gibi ek şart varsa cond=true: uçak aralıktaysa gösterilir ama AMM'de kontrol uyarısı verilir
+  return t._bi = r.length ? {r, cond: !/^\s*THY\s+[\d,\s\-–]+$/.test(txt)} : null;
 };
+const bRanges = t => { const i = bInfo(t); return i ? i.r : null; };
 const keyOf = (t, rec) => t.air ? (bRanges(t) ? {k: 'FSN', v: rec.fsn || null, r: bRanges(t)} : {k: 'UÇAK', v: rec.bid || null, r: t.air}) : t.msn ? {k: 'MSN', v: parseInt(rec.msn, 10) || null, r: t.msn} : {k: 'FSN', v: rec.fsn, r: t.fsn};
 const effOk = (t, rec) => { if (t.air) { const r = bRanges(t); if (r) return !rec.fsn || r.some(([a, b]) => rec.fsn >= a && rec.fsn <= b); return !rec.bid || t.air.includes(String(rec.bid)); }
    const e = keyOf(t, rec); return !e.v || !e.r || e.r.some(([a, b]) => e.v >= a && e.v <= b); };
@@ -637,6 +638,7 @@ function render(force) {
       <div class="m"><span class="ref">${esc(t.pf || 'AMM')}:${esc(ref)}</span>${rv ? `<span class="tag">REV:${esc(rv)}</span>` : ''}${engTag}${badge}</div>
       ${eff ? `<div class="eff">Eff: ${eff}</div>` : ''}
       ${t.unk ? `<div class="w">Effectivity ayrıştırılamadı — AMM'de kontrol edin.</div>` : ''}
+      ${t.air && ok && bInfo(t) && bInfo(t).cond ? `<div class="w">Servis bülteni / konfigürasyon şartı içeriyor — AMM'de kontrol edin.</div>` : ''}
       <div class="acts">
         ${href ? `<a class="btn pri" href="${esc(href)}" target="_blank" rel="noopener noreferrer">AMM'de aç</a>` : ''}
         <button class="btn copy" data-ref="${esc(t.pf || 'AMM')}:${esc(t.ref)}">Kopyala</button>
@@ -692,6 +694,13 @@ if (DEV) {
   if ($('tail').value) onTail();
   if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol) && !DEV) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.addEventListener('message', e => {
+      if (!e.data || e.data.type !== 'updated' || document.getElementById('updBar')) return;
+      const b = document.createElement('button'); b.id = 'updBar'; b.type = 'button';
+      b.textContent = 'Yeni veri/sürüm indirildi — yenilemek için dokunun';
+      b.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:50;background:#f97316;color:#fff;border:0;border-radius:999px;padding:10px 18px;font:600 14px system-ui;box-shadow:0 4px 16px #0006;cursor:pointer';
+      b.onclick = () => location.reload(); document.body.appendChild(b);
+    });
   }
 })();
 </script>
