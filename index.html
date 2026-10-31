@@ -244,12 +244,14 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;
   <!-- Alt bilgi -->
   <div class="foot">
     <span id="foot1"></span>
-    <span>AMM Finder v1.16</span>
+    <span>AMM Finder v1.17</span>
   </div>
 </div>
 
 <script>
-const ATA = {"05":"Time Limits/Maintenance Checks","06":"Dimensions & Areas","07":"Lifting & Shoring","08":"Leveling & Weighing","09":"Towing & Taxiing","10":"Parking, Mooring, Storage","11":"Placards & Markings","12":"Servicing","20":"Standard Practices","21":"Air Conditioning","22":"Auto Flight","23":"Communications","24":"Electrical Power","25":"Equipment/Furnishings","26":"Fire Protection","27":"Flight Controls","28":"Fuel","29":"Hydraulic Power","30":"Ice & Rain Protection","31":"Indicating/Recording","32":"Landing Gear","33":"Lights","34":"Navigation","35":"Oxygen","36":"Pneumatic","38":"Water/Waste","44":"Cabin Systems","45":"Central Maintenance System","46":"Information Systems","47":"Nitrogen Generation","49":"APU","51":"Structures - General","52":"Doors","53":"Fuselage","54":"Nacelles/Pylons","55":"Stabilizers","56":"Windows","57":"Wings","70":"Powerplant - General","71":"Power Plant","72":"Engine","73":"Engine Fuel & Control","74":"Ignition","75":"Air","76":"Engine Controls","77":"Engine Indicating","78":"Exhaust","79":"Oil","80":"Starting"};
+const ATA = {"05":"Time Limits/Maintenance Checks","06":"Dimensions & Areas","07":"Lifting & Shoring","08":"Leveling & Weighing","09":"Towing & Taxiing","10":"Parking, Mooring, Storage","11":"Placards & Markings","12":"Servicing","20":"Standard Practices","21":"Air Conditioning","22":"Auto Flight","23":"Communications","24":"Electrical Power","25":"Equipment/Furnishings","26":"Fire Protection","27":"Flight Controls","28":"Fuel","29":"Hydraulic Power","30":"Ice & Rain Protection","31":"Indicating/Recording","32":"Landing Gear","33":"Lights","34":"Navigation","35":"Oxygen","36":"Pneumatic","38":"Water/Waste","42":"Integrated Modular Avionics","44":"Cabin Systems","45":"Central Maintenance System","46":"Information Systems","47":"Nitrogen Generation","49":"APU","50":"Cargo & Accessory Compartments","51":"Structures - General","52":"Doors","53":"Fuselage","54":"Nacelles/Pylons","55":"Stabilizers","56":"Windows","57":"Wings","70":"Powerplant - General","71":"Power Plant","72":"Engine","73":"Engine Fuel & Control","74":"Ignition","75":"Air","76":"Engine Controls","77":"Engine Indicating","78":"Exhaust","79":"Oil","80":"Starting","91":"Charts"};
+// A320 AMM'de motor görevleri üretici kodu yerine bölüm koduyla etiketli: CFMB=CFM56, IAE=V2500, TIC/VSV/EBU=PW1100G (GTF)
+const ENG_TAGS = {CFM: ['CFM', 'CFMB'], IAE: ['IAE'], PW: ['PW', 'TIC', 'VSV', 'EBU'], GE: ['GE'], RR: ['RR']};
 const DEFAULT_MAP = {"318":"A320","319":"A320","320":"A320","321":"A320","330":"A330","340":"A340","350":"A350"};
 const FLEET_JS = 'filo.js';      // dosya olarak açıldığında okunabilen filo verisi (donustur.html üretir)
 const FLEET_CSV = 'filo.csv';    // web adresinden açıldığında doğrudan okunur
@@ -599,7 +601,7 @@ function render(force) {
   const hits = []; let hidden = 0;
   d.tasks.forEach(t => {
     if (ch !== 'ALL' && t.ch !== ch) return;
-    if (t.eng && fam && t.eng !== fam) return;                // başka üreticinin motor görevi
+    if (t.eng && fam && !(ENG_TAGS[fam] || [fam]).includes(t.eng)) return;                // başka üreticinin motor görevi
     if (words.length) { const h = t._h || (t._h = norm(t.title + ' ' + t.ref)); if (!words.every(w => h.includes(w))) return; }
     const ok = effOk(t, rec);
     if (!ok && !showAll) { hidden++; return; }
