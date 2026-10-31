@@ -293,7 +293,8 @@ function mergeDataset(cur, j) {
   const tasks = cur.tasks.filter(x => !chs.includes(x.ch)).concat(j.tasks);
   const chInfo = {...cur.chInfo};
   chs.forEach(c => chInfo[c] = {revNum: j.meta.revNum || null, revDate: j.meta.revDate || null, exported: j.meta.exported || null});
-  return {meta: {type: String(j.meta.type || '').toUpperCase(), linkTemplate: j.meta.linkTemplate || (cur.meta && cur.meta.linkTemplate) || ''}, chInfo, tasks};
+  return {meta: {type: String(j.meta.type || '').toUpperCase(), linkTemplate: j.meta.linkTemplate || (cur.meta && cur.meta.linkTemplate) || '',
+                    doc: j.meta.doc || (cur.meta && cur.meta.doc) || '', issueDate: j.meta.issueDate || (cur.meta && cur.meta.issueDate) || ''}, chInfo, tasks};
 }
 function normStore(store) {
   Object.values(store).forEach(d => {
@@ -565,10 +566,19 @@ const engFam = e => { e = String(e || '').toUpperCase();
   if (/PW|PRATT|JT9/.test(e)) return 'PW';
   if (/TRENT|RB211|ROLLS|\bRR\b/.test(e)) return 'RR';
   return ''; };
-const effLabel = rec => (state.cur && state.cur.d && state.cur.d.tasks.some(x => x.air)) ? rec.reg : (state.cur && state.cur.d && state.cur.d.tasks.some(x => x.msn)) ? `MSN ${parseInt(rec.msn, 10) || ''}` : `FSN ${rec.fsn || ''}`;
+const effLabel = rec => (state.cur && state.cur.d && state.cur.d.tasks.some(x => x.air)) ? (rec.fsn ? `FSN ${rec.fsn}` : rec.reg) : (state.cur && state.cur.d && state.cur.d.tasks.some(x => x.msn)) ? `MSN ${parseInt(rec.msn, 10) || ''}` : `FSN ${rec.fsn || ''}`;
 // Geçerlilik: Airbus A320/A330/A340 görevleri FSN'e, A350 görevleri MSN'e göre yazılır.
-const keyOf = (t, rec) => t.air ? {k: 'UÇAK', v: rec.bid || null, r: t.air} : t.msn ? {k: 'MSN', v: parseInt(rec.msn, 10) || null, r: t.msn} : {k: 'FSN', v: rec.fsn, r: t.fsn};
-const effOk = (t, rec) => { if (t.air) return !rec.bid || t.air.includes(String(rec.bid));
+// Boeing: geçerlilik metni "THY 001-004, 006, 008-017, 201-999" biçimindedir; THY filo numarası (FSN) aralıklarıdır.
+const bRanges = t => {
+  if (t._br !== undefined) return t._br;
+  let r = null; const m = /^\s*[A-Z]{2,4}\s+([\d,\s\-–]+)$/.exec(String(t.app || ''));
+  if (m) { r = []; m[1].split(',').forEach(tok => { tok = tok.trim(); let x;
+    if ((x = /^(\d+)\s*[-–]\s*(\d+)$/.exec(tok))) r.push([+x[1], +x[2]]); else if ((x = /^(\d+)$/.exec(tok))) r.push([+x[1], +x[1]]); });
+    if (!r.length) r = null; }
+  return t._br = r;
+};
+const keyOf = (t, rec) => t.air ? (bRanges(t) ? {k: 'FSN', v: rec.fsn || null, r: bRanges(t)} : {k: 'UÇAK', v: rec.bid || null, r: t.air}) : t.msn ? {k: 'MSN', v: parseInt(rec.msn, 10) || null, r: t.msn} : {k: 'FSN', v: rec.fsn, r: t.fsn};
+const effOk = (t, rec) => { if (t.air) { const r = bRanges(t); if (r) return !rec.fsn || r.some(([a, b]) => rec.fsn >= a && rec.fsn <= b); return !rec.bid || t.air.includes(String(rec.bid)); }
    const e = keyOf(t, rec); return !e.v || !e.r || e.r.some(([a, b]) => e.v >= a && e.v <= b); };
 
 function render(force) {
@@ -605,13 +615,16 @@ function render(force) {
     return;
   }
   $('emptyState').hidden = true; $('resultsWrap').hidden = false;
-  const tpl = (d.meta.linkTemplate || '').replace(/%3A/gi, ':').replace(/%3B/gi, ';');   // portalın kendi adres yazımı (wc=actype:A320;...)
+  let tpl = (d.meta.linkTemplate || '').replace(/%3A/gi, ':').replace(/%3B/gi, ';');
+  // Boeing Toolbox: görev adresi doküman ve görev numarasından kurulur (location ve cirType = görev numarası)
+  if (d.meta.doc && d.meta.issueDate && !/\{(ID|REF)\}/.test(tpl))
+    tpl = `https://toolbox.boeing.com/webui/DocumentViewer;productNumber=${d.meta.doc};issueDate=${d.meta.issueDate};productFormat=XML;revisionState=PUBLISHED;location={REF};cirType={REF}`;   // portalın kendi adres yazımı (wc=actype:A320;...)
   box.innerHTML = hits.slice(0, MAX_SHOW).map(({t, ok}) => {
     const ref = `${t.ref}${t.rev ? '-' + t.rev : ''}`;
-    const href = tpl.startsWith('https://') ? tpl.replace('{ID}', encodeURIComponent(t.id)).replace('{REF}', encodeURIComponent(t.ref)) : '';
+    const href = tpl.startsWith('https://') ? tpl.replace(/\{ID\}/g, encodeURIComponent(t.id)).replace(/\{REF\}/g, encodeURIComponent(t.ref)) : '';
     const rv = (d.chInfo[t.ch] || {}).revNum;
     const ek = keyOf(t, rec);
-    const badge = t.air ? (!ek.v ? `<span class="tag">belirli uçaklara özel</span>` : !ok ? `<span class="tag bad">bu uçak için geçerli değil</span>` : `<span class="tag ok">bu uçak için geçerli ✓</span>`) : (!t.msn && !t.fsn) ? `<span class="tag">tüm uçaklar</span>` : !ek.v ? '' : !ok ? `<span class="tag bad">${ek.k} ${ek.v} için geçerli değil</span>`
+    const badge = t.air ? (!ek.v ? `<span class="tag">belirli uçaklara özel</span>` : (() => { const lb = ek.k === 'UÇAK' ? 'bu uçak' : `${ek.k} ${ek.v}`; return !ok ? `<span class="tag bad">${lb} için geçerli değil</span>` : `<span class="tag ok">${lb} ✓</span>`; })()) : (!t.msn && !t.fsn) ? `<span class="tag">tüm uçaklar</span>` : !ek.v ? '' : !ok ? `<span class="tag bad">${ek.k} ${ek.v} için geçerli değil</span>`
       : ek.r ? `<span class="tag ok">${ek.k} ${ek.v} ✓</span>` : `<span class="tag">tüm uçaklar</span>`;
     const engTag = t.eng ? `<span class="tag">${esc(t.eng)} motor</span>` : '';
     const eff = t.app ? esc(t.app.replace(/^[*\s]*/, '')) : (t.note ? esc(t.note) : '');

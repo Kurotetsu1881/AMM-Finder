@@ -207,16 +207,8 @@
   const okCh = [...done.keys()].sort();
   const rows = okCh.flatMap(c => done.get(c)).sort((a, b) => a.ref.localeCompare(b.ref));
 
-  // ---- "AMM'de aç" bağlantı şablonu: açık görevin adresindeki kimlik/görev numarası yer tutucuyla değiştirilir ----
-  let nId = 0, nRef = 0;
-  const idSet = new Set(rows.map(r => String(r.id).toLowerCase())), refSet = new Set(rows.map(r => r.ref));
-  let tpl = location.href.replace(/[0-9a-f]{8}(?:-|%2D)[0-9a-f]{4}(?:-|%2D)[0-9a-f]{4}(?:-|%2D)[0-9a-f]{4}(?:-|%2D)[0-9a-f]{12}/gi, m => {
-    if (idSet.has(m.replace(/%2D/gi, '-').toLowerCase())) { nId++; return '{ID}'; } return m; });
-  tpl = tpl.replace(/\d\d-\d\d-\d\d-\d{3}-\d{3}/g, m => { if (refSet.has(m)) { nRef++; return '{REF}'; } return m; });
-  console.log(`Bağlantı şablonu: ${nId} kimlik, ${nRef} görev numarası yer tutucuya çevrildi.`);
-  if (!nId && !nRef) {
-    console.warn('Açık sayfada görev yok, bağlantı şablonu oluşturulamadı. Taramadan sonra sol ağaçtan bir görev açıp adresi bana gönderin; ya da kodu bir görev açıkken çalıştırın.');
-  }
+  // "AMM'de aç" bağlantısı: Toolbox görev adresi doküman ve görev numarasından kurulur
+  const tpl = `${O}/webui/DocumentViewer;productNumber=${nbr};issueDate=${issue};productFormat=XML;revisionState=PUBLISHED;location={REF};cirType={REF}`;
 
   const out = {meta: {type, doc: nbr, revNum, revDate, issueDate: issue, productInstanceId: PI, internalRevision: rv && rv.internalRevision,
                       linkTemplate: tpl, pageUrl: location.href, pageTitle: document.title, exported: new Date().toISOString(),
