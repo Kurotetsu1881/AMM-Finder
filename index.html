@@ -94,7 +94,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;
 
 /* adımlar */
 #steps{grid-column:1/-1;margin-top:2px}
-.fields{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}
+.fields{display:grid;grid-template-columns:1fr 1.2fr 1fr;gap:10px 14px}
 .fields label{display:block;margin:0 0 5px;font-size:12px;font-weight:600;color:#cbd5e1}
 .fld{width:100%;height:46px;padding:0 14px;border-radius:12px;border:1px solid rgba(148,163,184,.4);background:rgba(3,7,18,.7);
   color:#fff;-webkit-text-fill-color:#fff;font-family:inherit;font-size:16px;outline:none}
@@ -218,7 +218,8 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;
       <div id="steps" hidden>
         <div class="fields">
           <div><label for="chapter">2) AMM chapter</label><select id="chapter" class="fld"></select></div>
-          <div><label for="q">3) Anahtar kelime</label>
+          <div><label for="section">3) Alt bölüm</label><select id="section" class="fld"><option value="">Tüm bölümler</option></select></div>
+          <div><label for="q">4) Anahtar kelime</label>
             <input id="q" class="fld" placeholder="GALLEY" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="search"></div>
         </div>
         <div id="resultBar" aria-live="polite">
@@ -244,7 +245,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;
   <!-- Alt bilgi -->
   <div class="foot">
     <span id="foot1"></span>
-    <span>AMM Finder v1.17</span>
+    <span>AMM Finder v1.18</span>
   </div>
 </div>
 
@@ -300,7 +301,7 @@ function mergeDataset(cur, j) {
   const chInfo = {...cur.chInfo};
   chs.forEach(c => chInfo[c] = {revNum: j.meta.revNum || null, revDate: j.meta.revDate || null, exported: j.meta.exported || null});
   return {meta: {type: String(j.meta.type || '').toUpperCase(), linkTemplate: j.meta.linkTemplate || (cur.meta && cur.meta.linkTemplate) || '',
-                    doc: j.meta.doc || (cur.meta && cur.meta.doc) || '', issueDate: j.meta.issueDate || (cur.meta && cur.meta.issueDate) || ''}, chInfo, tasks};
+                    doc: j.meta.doc || (cur.meta && cur.meta.doc) || '', sections: Object.assign({}, cur.meta && cur.meta.sections, j.meta.sections), issueDate: j.meta.issueDate || (cur.meta && cur.meta.issueDate) || ''}, chInfo, tasks};
 }
 function normStore(store) {
   Object.values(store).forEach(d => {
@@ -491,6 +492,7 @@ async function onTail() {
   state.cur = {rec, d: null};
   fillChapters(Object.keys(ATA), prevCh);                    // kutu veri beklemeden hemen açılır
   $('q').value = prevQ;
+  fillSections('');
   $('steps').hidden = false;
   syncSteps(); render(false);
   const d = await ensureType(rec.type);
@@ -510,7 +512,27 @@ async function onTail() {
   const pill = $('revPill');
   if (ri.short) { pill.hidden = false; pill.textContent = `${rec.type} · ${ri.short}`; pill.className = 'pill'; }
   fillChapters([...new Set(d.tasks.map(x => x.ch))].sort(), $('chapter').value);
+  fillSections($('section').value);
   syncSteps(); render(false);
+}
+// Alt bölüm (section): görev numarasının ilk iki grubu, örn. 25-31-11-000-801 → 25-31
+const secOf = t => t._s !== undefined ? t._s : (t._s = ((/\b(\d{2}-\d{2})-\d{2}\b/.exec(t.ref) || [])[1] || ''));
+function fillSections(keep) {
+  const sel = $('section'), ch = $('chapter').value, o = ['<option value="">Tüm bölümler</option>'];
+  if (state.cur && state.cur.d && ch && ch !== 'ALL') {
+    const {rec, d} = state.cur, fam = engFam(rec.engine), showAll = $('showAll').checked, cnt = new Map();
+    d.tasks.forEach(t => {
+      if (t.ch !== ch) return;
+      if (t.eng && fam && !(ENG_TAGS[fam] || [fam]).includes(t.eng)) return;
+      if (!showAll && !effOk(t, rec)) return;
+      const k = secOf(t); if (k) cnt.set(k, (cnt.get(k) || 0) + 1);
+    });
+    const names = (d.meta && d.meta.sections) || {};
+    [...cnt.keys()].sort().forEach(k => o.push(`<option value="${k}">${k}${names[k] ? ' · ' + esc(names[k]) : ''} (${nf(cnt.get(k))})</option>`));
+  }
+  sel.innerHTML = o.join('');
+  if (keep && [...sel.options].some(x => x.value === keep)) sel.value = keep;
+  sel.disabled = sel.options.length < 2;
 }
 function fillChapters(chs, keep) {
   $('chapter').innerHTML = `<option value="">Chapter seçin…</option><option value="ALL">Tüm chapter'lar</option>` +
@@ -558,11 +580,12 @@ $('tail').addEventListener('keydown', e => {
   }
 });
 $('clearBtn').addEventListener('click', () => { $('tail').value = ''; hideSugg(); onTail(); $('tail').focus(); });
-$('chapter').addEventListener('change', () => { syncSteps(); if ($('chapter').value) $('q').focus(); render(false); });
+$('chapter').addEventListener('change', () => { fillSections(''); syncSteps(); if ($('chapter').value) $('q').focus(); render(false); });
+$('section').addEventListener('change', () => { $('q').focus(); render(false); });
 $('q').addEventListener('input', () => render(false));
 $('q').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('q').blur(); } });
 $('listAll').addEventListener('click', () => render(true));
-$('showAll').addEventListener('change', () => render(false));
+$('showAll').addEventListener('change', () => { fillSections($('section').value); render(false); });
 
 // Motor üreticisi: filodaki "Engine Model" değerinden (CF6→GE, PW4000→PW, Trent→RR)
 const engFam = e => { e = String(e || '').toUpperCase();
@@ -593,14 +616,15 @@ function render(force) {
   const words = norm($('q').value).split(/\s+/).filter(Boolean);
   const none = () => { $('resultsWrap').hidden = true; $('emptyState').hidden = true; box.innerHTML = '';
                        $('countWrap').hidden = true; $('hiddenNote').textContent = ''; };
-  if (!state.cur || !ch || (!force && !words.length)) { none(); return; }
+  if (!state.cur || !ch || (!force && !words.length && !$('section').value)) { none(); return; }
   const {rec, d} = state.cur;
   if (!d) { none(); $('emptyState').hidden = false; $('emptyState').textContent = 'AMM verisi yükleniyor…'; return; }
-  const showAll = $('showAll').checked;
+  const showAll = $('showAll').checked, sec = $('section').value;
   const fam = engFam(rec.engine);
   const hits = []; let hidden = 0;
   d.tasks.forEach(t => {
     if (ch !== 'ALL' && t.ch !== ch) return;
+    if (sec && secOf(t) !== sec) return;
     if (t.eng && fam && !(ENG_TAGS[fam] || [fam]).includes(t.eng)) return;                // başka üreticinin motor görevi
     if (words.length) { const h = t._h || (t._h = norm(t.title + ' ' + t.ref)); if (!words.every(w => h.includes(w))) return; }
     const ok = effOk(t, rec);

@@ -68,6 +68,7 @@
     async del(k) { try { const d = await this.open(); await new Promise(res => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').delete(k); t.oncomplete = res; t.onerror = res; }); } catch (e) {} }
   };
   const KEY = `ammscan350v2|${PREFIX}|${revNum}`;
+  const secNames = Object.assign({}, await IDB.get(KEY + '|sec'));      // alt bölüm adları (25-31 → FORWARD GALLEY)
   const saved0 = RESUME ? ((await IDB.get(KEY)) || {}) : {};
   const saved = Object.fromEntries(Object.entries(saved0).filter(([, v]) => v && v.length));   // 0 görevli eski sonuçlar tekrar denenir          // {chapter: [görevler]}
   const resumed = Object.keys(saved);
@@ -171,6 +172,7 @@
     } else {
       if (job.root && !((j.childTocItems || []).length || (j.listSolutions || []).length)) s.empty = true;
       (j.childTocItems || []).forEach(c => {
+        { const sm = /^\s*(\d{2}-\d{2})\s*[-–:]?\s+(.+)$/.exec(String((c && c.title) || '')); if (sm) secNames[sm[1]] = sm[2].replace(/^\([A-Z]{2,4}\)\s*[-–]?\s*/, '').trim() || secNames[sm[1]] || ''; }
         if (!c || !c.id) return;
         if (dmOf(c)) { addSol(c, s.mine); return; }       // görev düğümü: indirilmez, doğrudan kaydedilir
         if (!s.seen.has(c.id)) { s.seen.add(c.id); s.pending++; queue.push({ch: job.ch, id: c.id}); }
@@ -200,7 +202,7 @@
     if (s.failed.length) return;                           // eksik: ikinci turda denenecek
     if (!s.mine.size) { skipCh.push(ch); console.warn(`Chapter ${ch}: düğümler bulundu ama 0 görev çıktı, kaydedilmedi.`); return; }
     done.set(ch, [...s.mine.values()].map(t => s.eng ? {...t, eng: s.eng} : t));
-    await IDB.set(KEY, Object.fromEntries(done));
+    await IDB.set(KEY, Object.fromEntries(done)); await IDB.set(KEY + '|sec', secNames);
     console.log(`✔ Chapter ${ch} tamam: ${s.mine.size} görev`);
   };
 
@@ -242,7 +244,7 @@
   const okCh = [...done.keys()].sort();
   const rows = okCh.flatMap(c => done.get(c)).sort((a, b) => a.ref.localeCompare(b.ref) || a.rev.localeCompare(b.rev));
   const out = {meta: {type, revNum, revDate, prefix: PREFIX, linkTemplate, pageTitle: document.title,
-                      exported: new Date().toISOString(), chapters: [...new Set(okCh.map(k => k.slice(0, 2)))], count: rows.length}, tasks: rows};
+                      exported: new Date().toISOString(), chapters: [...new Set(okCh.map(k => k.slice(0, 2)))], count: rows.length, sections: secNames}, tasks: rows};
   const complete = !badCh.length && CHAPTERS === 'ALL';
   const fname = complete ? `amm_${type}.json` : `amm_${type}_PARCA.json`;
   const a = document.createElement('a');
@@ -251,7 +253,7 @@
   window.__tasks = rows;
   const mins = ((Date.now() - t0) / 60000).toFixed(1);
   console.log(`%cBİTTİ: ${rows.length} görev, ${nReq} istek, ${mins} dk, ${skipped} atlanan kayıt. Chapter: ${okCh.join(',')} · atlanan sistem tanımı/şema kaydı: ${nSD}`, 'font-weight:bold;color:green');
-  if (complete) { await IDB.del(KEY); console.log(`İnen dosya: ${fname} → AMM Finder klasörüne koyun (GitHub'a yükleyin).`); }
+  if (complete) { await IDB.del(KEY); await IDB.del(KEY + '|sec'); console.log(`İnen dosya: ${fname} → AMM Finder klasörüne koyun (GitHub'a yükleyin).`); }
   else {
     if (CHAPTERS !== 'ALL') console.warn("Not: CHAPTERS değeri 'ALL' değil, bu yüzden dosya PARCA olarak indi.");
     console.warn(`Dosya tam değil (${fname}). Eksik/yarım chapter'lar: ${JSON.stringify(badCh)}. Kodu AYNI SAYFADA tekrar çalıştırın: biten chapter'lar tekrar indirilmez, sadece eksikler denenir ve tam dosya (amm_${type}.json) iner.`);
