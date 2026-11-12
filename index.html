@@ -257,7 +257,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;
   <!-- Alt bilgi -->
   <div class="foot">
     <span id="foot1"></span>
-    <span>AMM Finder v1.21</span>
+    <span>AMM Finder v1.22</span>
   </div>
 </div>
 
@@ -726,6 +726,15 @@ if (DEV) {
 
 // ---------- Başlangıç ----------
 (async () => {
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol) && !DEV) {   // dinleyici EN BAŞTA: SW mesajı veri yüklenirken gelebilir
+    navigator.serviceWorker.addEventListener('message', e => {
+      if (!e.data || e.data.type !== 'updated' || document.getElementById('updBar')) return;
+      const b = document.createElement('button'); b.id = 'updBar'; b.type = 'button';
+      b.textContent = 'Yeni veri/sürüm indirildi — yenilemek için dokunun';
+      b.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:50;background:#f97316;color:#fff;border:0;border-radius:999px;padding:10px 18px;font:600 14px system-ui;box-shadow:0 4px 16px #0006;cursor:pointer';
+      b.onclick = () => location.reload(); document.body.appendChild(b);
+    });
+  }
   loadTypeMap();
   try { state.stored = normStore((await db.get('data')) || {}); } catch (e) { state.stored = {}; }
   await loadFleet();
@@ -734,13 +743,6 @@ if (DEV) {
   if ($('tail').value) onTail();
   if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol) && !DEV) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
-    navigator.serviceWorker.addEventListener('message', e => {
-      if (!e.data || e.data.type !== 'updated' || document.getElementById('updBar')) return;
-      const b = document.createElement('button'); b.id = 'updBar'; b.type = 'button';
-      b.textContent = 'Yeni veri/sürüm indirildi — yenilemek için dokunun';
-      b.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:50;background:#f97316;color:#fff;border:0;border-radius:999px;padding:10px 18px;font:600 14px system-ui;box-shadow:0 4px 16px #0006;cursor:pointer';
-      b.onclick = () => location.reload(); document.body.appendChild(b);
-    });
   }
 })();
 </script>

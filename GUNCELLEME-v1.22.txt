@@ -1,0 +1,7 @@
+AMM Finder v1.22 — "Yeni veri/sürüm indirildi" uyarısı düzeltmesi
+Değişen dosyalar: sw.js, index.html (GitHub'daki eskilerin üstüne yükleyin).
+Nedenler ve çözüm:
+1) Uyarı, sunucunun ETag/Last-Modified/Content-Length başlıklarının farkına bakıyordu; GitHub Pages bu başlıkları her seferinde farklı verebildiği için dosya değişmediği halde uyarı çıkıyordu. Artık dosyanın İÇERİĞİ (SHA-256) karşılaştırılıyor; sadece gerçekten değişen dosyada uyarı çıkar.
+2) Önbellekten verilen dosya yanıtı iki kez kullanıldığı için gerçek değişiklik algılaması da bozuktu; düzeltildi.
+3) Sayfa, servis çalışanı mesajını dinlemeye artık en başta başlıyor (veri yüklenirken gelen uyarı kaçmasın).
+İlk açılışta (güncelleme sonrası) bir kez uyarı görebilirsiniz; dokunun, sonrasında tekrarlamaz.
